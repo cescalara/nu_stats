@@ -51,7 +51,6 @@ class Simulation:
         self.D = luminosity_distance(self.z)
         self.F = self.L / (4 * np.pi * self.D ** 2)
         self.F = self.F.to(u.GeV / (u.cm ** 2 * u.s))
-        self.f = self._get_associated_fraction()
 
         # Make power law spectra
         ps_norm = self._get_norm()
@@ -61,6 +60,7 @@ class Simulation:
         self.diffuse_bg = PowerLaw(
             self.F_diff_norm, self.Emin, self.Emax, self.Enorm, self.gamma
         )
+        self.f = self._get_associated_fraction()
         self.z_bg = 1  # Assume bg at redshift 1
 
         # Assume simple constant effective area for now
@@ -77,11 +77,14 @@ class Simulation:
 
         # Store truth for comparison with fits in appropriate units
         self.truth = collections.OrderedDict()
-        self.truth["L"] = self.L.to(u.GeV / u.s)
+        self.truth["L"] = self.L.to(u.GeV / u.s).value
         self.truth["gamma"] = self.gamma
-        self.truth["F_diff"] = self.diffuse_bg.integrate(self.Emin, self.Emax).to(
-            1 / (u.s * u.m ** 2)
+        self.truth["F_diff"] = (
+            self.diffuse_bg.integrate(self.Emin, self.Emax)
+            .to(1 / (u.s * u.m ** 2))
+            .value
         )
+        self.truth["f"] = self.f
 
     def run(self, seed=42):
         """
@@ -95,6 +98,7 @@ class Simulation:
 
         N = np.random.poisson(Nex)
         print("Simulating %i events..." % N)
+        self.N = N
 
         # Get source direction as a unit vector
         self.coord.representation_type = "cartesian"
@@ -102,9 +106,10 @@ class Simulation:
             [self.coord.x.value, self.coord.y.value, self.coord.z.value]
         )
         self.coord.representation_type = "spherical"
+        self.source_dir = source_dir
 
         # Convert angular error to vMF kappa
-        kappa = 7552 * np.power(self.ang_reco_err.value, -2)
+        self.kappa = 7552 * np.power(self.ang_reco_err.value, -2)
 
         # Sample labels 0 <=> PS, 1 <=> BG
         self.labels = np.random.choice([0, 1], p=weights, size=N)
@@ -131,7 +136,7 @@ class Simulation:
 
             self.Edet[i] = np.random.lognormal(np.log(self.Earr[i].value), 0.5) * u.GeV
 
-            self.det_dir[i] = sample_vMF(self.true_dir[i], kappa, 1)
+            self.det_dir[i] = sample_vMF(self.true_dir[i], self.kappa, 1)
 
         # Convert unit vectors to coords
         self.det_coord = SkyCoord(
@@ -187,6 +192,27 @@ class Simulation:
 
             ax.add_patch(circle)
 
+    def get_fit_input(self):
+
+        fit_input = collections.OrderedDict()
+
+        fit_input["N"] = self.N
+        fit_input["Edet"] = self.Edet.to(u.GeV).value
+        fit_input["det_dir"] = self.det_dir
+
+        fit_input["source_dir"] = self.source_dir
+        fit_input["D"] = self.D.to(u.m).value
+        fit_input["z"] = self.z
+        fit_input["z_bg"] = self.z_bg
+        fit_input["Emin"] = self.Emin.to(u.GeV).value
+        fit_input["Emax"] = self.Emax.to(u.GeV).value
+
+        fit_input["T"] = self.time.to(u.s).value
+        fit_input["kappa"] = self.kappa
+        fit_input["aeff"] = self.effective_area.to(u.m ** 2).value
+
+        return fit_input
+
     def _get_N_expected(self):
         """
         Calculate the expected number of events.
@@ -216,7 +242,11 @@ class Simulation:
         Calculate the associated fraction.
         """
 
-        pass
+        F_int_ps = self.point_source.integrate(self.Emin, self.Emax)
+
+        F_int_bg = self.diffuse_bg.integrate(self.Emin, self.Emax)
+
+        return F_int_ps / (F_int_bg + F_int_ps)
 
     def _get_norm(self):
         """
