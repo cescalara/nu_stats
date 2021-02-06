@@ -23,21 +23,23 @@ sys.path.append("../../")
 from nu_stats.simulation import Simulation
 ```
 
+## Simulation
+
+Simulate some fake data using the `nu_stats.simulation` module.
+
 ```python
+# Choose simulation parameters
 L = 1e48 * (u.erg/u.s)
 gamma = 2.2
 z = 0.3
-F_diff = 1e-15 * 1/(u.GeV * u.cm**2 * u.s)
+F_diff_norm = 1e-15 * 1/(u.GeV * u.cm**2 * u.s)
 Emin = 1e5 * u.GeV
 Emax = 1e8 * u.GeV
 Enorm = 1e5 * u.GeV
 ```
 
 ```python
-sim = Simulation(L, gamma, z, F_diff, Emin, Emax, Enorm)
-```
-
-```python
+sim = Simulation(L, gamma, z, F_diff_norm, Emin, Emax, Enorm)
 sim.run()
 ```
 
@@ -48,6 +50,9 @@ sim.show_spectrum()
 ```python
 sim.show_skymap()
 ```
+
+## Fit
+Fit the simulated data using the Stan model `toy_bhm.stan`.
 
 ```python
 

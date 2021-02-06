@@ -24,7 +24,7 @@ class Simulation:
         L: u.erg / u.s,
         gamma: float,
         z: float,
-        F_diff: 1 / (u.GeV * u.cm ** 2 * u.s),
+        F_diff_norm: 1 / (u.GeV * u.cm ** 2 * u.s),
         Emin: u.GeV = 1e5,
         Emax: u.GeV = 1e8,
         Enorm: u.GeV = 1e5,
@@ -33,7 +33,7 @@ class Simulation:
         :param L: Luminosity of source
         :param gamma: Spectral index of source
         :param z: Redshift of source
-        :param F_diff: Diffuse backround flux at Emin
+        :param F_diff_norm: Diffuse backround flux at Emin
         :param Emin: Minimum energy
         :param Emax: Maximum energy
         :param Enorm: Normalisation energy
@@ -42,7 +42,7 @@ class Simulation:
         self.L = L
         self.gamma = gamma
         self.z = z
-        self.F_diff = F_diff
+        self.F_diff_norm = F_diff_norm
         self.Emin = Emin
         self.Emax = Emax
         self.Enorm = Enorm
@@ -59,7 +59,7 @@ class Simulation:
             ps_norm, self.Emin, self.Emax, self.Enorm, self.gamma
         )
         self.diffuse_bg = PowerLaw(
-            self.F_diff, self.Emin, self.Emax, self.Enorm, self.gamma
+            self.F_diff_norm, self.Emin, self.Emax, self.Enorm, self.gamma
         )
         self.z_bg = 1  # Assume bg at redshift 1
 
@@ -75,11 +75,13 @@ class Simulation:
         self.dec = 5 * u.deg
         self.coord = SkyCoord(self.ra, self.dec, frame="icrs")
 
-        # Store truth for comparison with fits
+        # Store truth for comparison with fits in appropriate units
         self.truth = collections.OrderedDict()
-        self.truth["L"] = self.L
+        self.truth["L"] = self.L.to(u.GeV / u.s)
         self.truth["gamma"] = self.gamma
-        self.truth["F_diff"] = self.F_diff
+        self.truth["F_diff"] = self.diffuse_bg.integrate(self.Emin, self.Emax).to(
+            1 / (u.s * u.m ** 2)
+        )
 
     def run(self, seed=42):
         """
