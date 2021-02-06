@@ -15,5 +15,35 @@ jupyter:
 ## Toy BHM
 
 ```python
+from astropy import units as u
+import numpy as np
+
+import sys
+sys.path.append("../../")
+
+%load_ext autoreload
+%autoreload 2
+from nu_stats.simulation import Simulation
+```
+
+```python
+L = 1e45 * (u.erg/u.s)
+gamma = 3.0
+z = 0.3
+F_diff = 1e-12 * 1/(u.GeV * u.cm**2 * u.s)
+Emin = 1e5 * u.GeV
+Emax = 1e8 * u.GeV
+Enorm = 1e5 * u.GeV
+```
+
+```python
+sim = Simulation(L, gamma, z, F_diff, Emin, Emax, Enorm)
+```
+
+```python
+sim._get_norm()
+```
+
+```python
 
 ```
