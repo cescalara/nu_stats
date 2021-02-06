@@ -27,10 +27,10 @@ from nu_stats.simulation import Simulation
 ```
 
 ```python
-L = 1e45 * (u.erg/u.s)
-gamma = 3.0
+L = 1e48 * (u.erg/u.s)
+gamma = 2.2
 z = 0.3
-F_diff = 1e-12 * 1/(u.GeV * u.cm**2 * u.s)
+F_diff = 1e-15 * 1/(u.GeV * u.cm**2 * u.s)
 Emin = 1e5 * u.GeV
 Emax = 1e8 * u.GeV
 Enorm = 1e5 * u.GeV
@@ -41,7 +41,11 @@ sim = Simulation(L, gamma, z, F_diff, Emin, Emax, Enorm)
 ```
 
 ```python
-sim._get_norm()
+sim.run()
+```
+
+```python
+sim.show_spectrum()
 ```
 
 ```python

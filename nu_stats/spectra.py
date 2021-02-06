@@ -52,5 +52,10 @@ class PowerLaw:
         """
         Sample N energies from this distribution.
         """
+        if N == 1:
 
-        return self.power_law_model.sample(N)
+            return self.power_law_model.samples(N)[0] * u.GeV
+
+        else:
+
+            return self.power_law_model.samples(N) * u.GeV
