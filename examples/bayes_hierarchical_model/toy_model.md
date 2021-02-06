@@ -20,9 +20,6 @@ import numpy as np
 
 import sys
 sys.path.append("../../")
-
-%load_ext autoreload
-%autoreload 2
 from nu_stats.simulation import Simulation
 ```
 
@@ -46,6 +43,10 @@ sim.run()
 
 ```python
 sim.show_spectrum()
+```
+
+```python
+sim.show_skymap()
 ```
 
 ```python

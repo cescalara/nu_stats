@@ -1,10 +1,16 @@
 import numpy as np
 from matplotlib import pyplot as plt
+import ligo.skymap.plot
+
 from astropy import units as u
+from astropy.coordinates import SkyCoord
 import collections
+
+from vMF.vMF import sample_vMF
 
 from .cosmology import luminosity_distance
 from .spectra import PowerLaw
+from .plotting import SphericalCircle
 
 
 class Simulation:
@@ -59,6 +65,7 @@ class Simulation:
 
         # Assume simple constant effective area for now
         self.effective_area = 1 * u.m ** 2
+        self.ang_reco_err = 6 * u.deg
 
         # Assume fixed observation time
         self.time = 10 * u.yr
@@ -66,6 +73,7 @@ class Simulation:
         # Assume fixed source position
         self.ra = 180 * u.deg
         self.dec = 5 * u.deg
+        self.coord = SkyCoord(self.ra, self.dec, frame="icrs")
 
         # Store truth for comparison with fits
         self.truth = collections.OrderedDict()
@@ -86,12 +94,24 @@ class Simulation:
         N = np.random.poisson(Nex)
         print("Simulating %i events..." % N)
 
+        # Get source direction as a unit vector
+        self.coord.representation_type = "cartesian"
+        source_dir = np.array(
+            [self.coord.x.value, self.coord.y.value, self.coord.z.value]
+        )
+        self.coord.representation_type = "spherical"
+
+        # Convert angular error to vMF kappa
+        kappa = 7552 * np.power(self.ang_reco_err.value, -2)
+
         # Sample labels 0 <=> PS, 1 <=> BG
         self.labels = np.random.choice([0, 1], p=weights, size=N)
 
         self.Etrue = np.zeros_like(self.labels) * u.GeV
         self.Earr = np.zeros_like(self.labels) * u.GeV
         self.Edet = np.zeros_like(self.labels) * u.GeV
+        self.true_dir = np.zeros((N, 3))
+        self.det_dir = np.zeros((N, 3))
 
         for i in range(N):
 
@@ -99,13 +119,27 @@ class Simulation:
 
                 self.Etrue[i] = self.point_source.sample()
                 self.Earr[i] = self.Etrue[i] / (1 + self.z)
+                self.true_dir[i] = source_dir
 
             elif self.labels[i] == 1:
 
                 self.Etrue[i] = self.diffuse_bg.sample()
                 self.Earr[i] = self.Etrue[i] / (1 + self.z_bg)
+                self.true_dir[i] = sample_vMF(np.array([1, 0, 0]), 0, 1)
 
             self.Edet[i] = np.random.lognormal(np.log(self.Earr[i].value), 0.5) * u.GeV
+
+            self.det_dir[i] = sample_vMF(self.true_dir[i], kappa, 1)
+
+        # Convert unit vectors to coords
+        self.det_coord = SkyCoord(
+            self.det_dir.T[0],
+            self.det_dir.T[1],
+            self.det_dir.T[2],
+            representation_type="cartesian",
+            frame="icrs",
+        )
+        self.det_coord.representation_type = "spherical"
 
         print("Done!")
 
@@ -114,7 +148,9 @@ class Simulation:
         Show simulated spectrum.
         """
 
-        bins = 10 ** np.linspace(np.log10(self.Emin.value), np.log10(self.Emax.value))
+        bins = 10 ** np.linspace(
+            np.log10(self.Emin.value) - 1, np.log10(self.Emax.value)
+        )
 
         fig, ax = plt.subplots()
         ax.hist(self.Etrue.value, bins=bins, alpha=0.7, label="Etrue")
@@ -128,7 +164,26 @@ class Simulation:
         Show simulated directions.
         """
 
-        pass
+        label_cmap = plt.cm.Set1(list(range(2)))
+
+        fig, ax = plt.subplots(subplot_kw={"projection": "astro degrees mollweide"})
+        fig.set_size_inches((7, 5))
+
+        for ra, dec, l in zip(
+            self.det_coord.icrs.ra,
+            self.det_coord.icrs.dec,
+            self.labels,
+        ):
+
+            circle = SphericalCircle(
+                (ra, dec),
+                self.ang_reco_err,
+                color=label_cmap[l],
+                alpha=0.5,
+                transform=ax.get_transform("icrs"),
+            )
+
+            ax.add_patch(circle)
 
     def _get_N_expected(self):
         """
