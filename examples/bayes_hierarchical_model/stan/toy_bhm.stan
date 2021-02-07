@@ -1,7 +1,6 @@
 functions {
 
 #include vMF.stan
-#include interpolation.stan
 #include utils.stan
   
 }
@@ -10,30 +9,31 @@ data {
 
   /* Neutrino data */
   int N;
-  vector[N] Edet; // in units of GeV
+  vector[N] Edet; // GeV
   unit_vector[3] det_dir[N];
 
   /* Source info */
   unit_vector[3] source_dir;
-  real D; // in units of m
+  real D; // m
   real z;
   real z_bg;
-  real Emin; // in units of GeV
-  real Emax; //  in units of GeV
+  real Emin; // GeV
+  real Emax; // GeV
   
   /* Detector info */
-  real T; // in units of s
+  real T; // s
   real kappa;
-  real aeff; // in units of m^2
+  real aeff; // m^2
+
 }
 
 parameters {
 
-  real<lower=1, upper=4> gamma;
+  real<lower=1, upper=3> gamma;
   
-  real<lower=0, upper=1e55> L; // units of GeV s^-1
+  real<lower=0, upper=1e55> L; // GeV s^-1
   
-  real<lower=0, upper=1e-5> F_diff; // units of m^-2 s^-1
+  real<lower=0, upper=1e-5> F_diff; // m^-2 s^-1
   
   vector<lower=Emin, upper=Emax>[N] Etrue;
   
@@ -45,12 +45,14 @@ transformed parameters {
   real F_src;
   vector[2] F;
   real Nex;
+  real Nex_ps;
+  real Nex_bg;
   vector[2] eps;
   vector[2] log_prob[N];
   vector[N] Earr;
   
-  F_src = L / (4 * pi() * pow(D, 2)); // units of GeV m^-2 s^-1
-  F_src *= flux_conv(gamma, Emin, Emax); // units of m^-2 s^-1
+  F_src = L / (4 * pi() * pow(D, 2)); // GeV m^-2 s^-1
+  F_src *= flux_conv(gamma, Emin, Emax); // m^-2 s^-1
 
   F[1] = F_src;
   F[2] = F_diff;
@@ -69,6 +71,7 @@ transformed parameters {
       /* Same spectrum for both components */
       log_prob[i][k] += spectrum_lpdf(Etrue[i] | gamma, Emin, Emax);
       
+
       /* Point source */
       if (k == 1) {
 
@@ -98,8 +101,10 @@ transformed parameters {
 
   }
 
-  eps = get_exposure_factor(gamma, T, aeff, z, z_bg);
-  Nex = get_Nex(F, eps);
+  /* Calculate expected number of events */
+  Nex_ps = T * aeff * F_src; 
+  Nex_bg = T * aeff * F_diff; 
+  Nex = Nex_ps + Nex_bg;
   
 }
 
@@ -118,6 +123,6 @@ model {
   /* Weakly informative priors */
   L ~ lognormal(log(1e51), 5);
   F_diff ~ lognormal(log(1e-6), 5);
-  gamma ~ normal(2, 2);
+  gamma ~ normal(2, 0.5);
   
 }

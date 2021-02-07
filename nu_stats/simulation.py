@@ -61,7 +61,7 @@ class Simulation:
             self.F_diff_norm, self.Emin, self.Emax, self.Enorm, self.gamma
         )
         self.f = self._get_associated_fraction()
-        self.z_bg = 1  # Assume bg at redshift 1
+        self.z_bg = 1.0  # Assume background at redshift 1
 
         # Assume simple constant effective area for now
         self.effective_area = 1 * u.m ** 2
@@ -223,17 +223,18 @@ class Simulation:
 
         # point_source
         ps_int = self.point_source.integrate(self.Emin, self.Emax)
-        z_factor = np.power(1 + self.z, -self.gamma)
-        Nex_ps = time * aeff * ps_int * z_factor
+        Nex_ps = time * aeff * ps_int
 
         # diffuse bg
         bg_int = self.diffuse_bg.integrate(self.Emin, self.Emax)
-        z_factor = np.power(1 + self.z_bg, -self.gamma)
-        Nex_bg = time * aeff * bg_int * z_factor
+        Nex_bg = time * aeff * bg_int
 
         # Weights for sampling
         Nex = Nex_ps.value + Nex_bg.value
         weights = [Nex_ps.value / Nex, Nex_bg.value / Nex]
+
+        self.Nex_ps = Nex_ps.value
+        self.Nex_bg = Nex_bg.value
 
         return Nex, weights
 

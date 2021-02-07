@@ -97,3 +97,18 @@ real spectrum_lpdf(real E, real gamma, real e_low, real e_up) {
   return log(p);
     
 }
+
+/**
+ * Generate random samples from a power law spectrum.
+ */
+real spectrum_rng(real gamma, real e_low, real e_up) {
+
+  real uni_sample;
+  real norm;
+  
+  norm = (1 - gamma) / (pow(e_up, 1-gamma) - pow(e_low, 1-gamma));
+  uni_sample = uniform_rng(0, 1);
+  
+  return pow( (uni_sample*(1-gamma))/norm + pow(e_low, 1-gamma), 1/(1-gamma) );
+
+}
