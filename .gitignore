@@ -177,10 +177,3 @@ Temporary Items
 # For Stan-generated code
 *.hpp
 .vscode/settings.json
-nu_stats/.vscode/settings.json
-examples/bayes_hierarchical_model/.vscode/settings.json
-*.ipynb
-*.ipynb
-examples/bayes_hierarchical_model/toy_model.ipynb
-examples/bayes_hierarchical_model/toy_model.ipynb
-*.ipynb
