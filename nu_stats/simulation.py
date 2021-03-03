@@ -28,15 +28,17 @@ class Simulation:
         Emin: u.GeV = 1e5,
         Emax: u.GeV = 1e8,
         Enorm: u.GeV = 1e5,
+        N_events: int = 0,
     ):
         """
-        :param L: Luminosity of source
+        :param L: Luminosity of source: 0 gives background only
         :param gamma: Spectral index of source
         :param z: Redshift of source
-        :param F_diff_norm: Diffuse backround flux at Emin
+        :param F_diff_norm: Diffuse background flux at Emin
         :param Emin: Minimum energy
         :param Emax: Maximum energy
         :param Enorm: Normalisation energy
+        :param N_events: Number of events to simulate, 0(default) to let self.time decide
         """
 
         self.L = L
@@ -47,18 +49,12 @@ class Simulation:
         self.Emax = Emax
         self.Enorm = Enorm
 
-        #  Compute some useful quantities
-        self.D = luminosity_distance(self.z)
-        self.F = self.L / (4 * np.pi * self.D ** 2)
-        self.F = self.F.to(u.GeV / (u.cm ** 2 * u.s))
-
         # Make power law spectra
-        ps_norm = self._get_norm()
         self.point_source = PowerLaw(
-            ps_norm, self.Emin, self.Emax, self.Enorm, self.gamma
+            self.gamma, self.Emin, self.Emax, self.Enorm, L = self.L, z = self.z
         )
         self.diffuse_bg = PowerLaw(
-            self.F_diff_norm, self.Emin, self.Emax, self.Enorm, self.gamma
+            self.gamma, self.Emin, self.Emax, self.Enorm, norm = self.F_diff_norm
         )
         self.f = self._get_associated_fraction()
         self.z_bg = 1.0  # Assume background at redshift 1
@@ -68,7 +64,11 @@ class Simulation:
         self.ang_reco_err = 6 * u.deg
 
         # Assume fixed observation time
-        self.time = 10 * u.yr
+        if N_events:
+            self.N = N_events
+        else:
+            self.time = 10 * u.yr
+            self.N = False
 
         # Assume fixed source position
         self.ra = 180 * u.deg
@@ -94,11 +94,14 @@ class Simulation:
         # Set seed
         np.random.seed(seed)
 
-        Nex, weights = self._get_N_expected()
+        if not self.N:
+            Nex, weights = self._get_N_expected()
 
-        N = np.random.poisson(Nex)
-        print("Simulating %i events..." % N)
-        self.N = N
+            N = np.random.poisson(Nex)
+            print("Simulating %i events..." % N)
+            self.N = N
+        else:
+            self.time, weights = self._get_time_weights()
 
         # Get source direction as a unit vector
         self.coord.representation_type = "cartesian"
@@ -112,15 +115,15 @@ class Simulation:
         self.kappa = 7552 * np.power(self.ang_reco_err.value, -2)
 
         # Sample labels 0 <=> PS, 1 <=> BG
-        self.labels = np.random.choice([0, 1], p=weights, size=N)
+        self.labels = np.random.choice([0, 1], p=weights, size=self.N)
 
         self.Etrue = np.zeros_like(self.labels) * u.GeV
         self.Earr = np.zeros_like(self.labels) * u.GeV
         self.Edet = np.zeros_like(self.labels) * u.GeV
-        self.true_dir = np.zeros((N, 3))
-        self.det_dir = np.zeros((N, 3))
+        self.true_dir = np.zeros((self.N, 3))
+        self.det_dir = np.zeros((self.N, 3))
 
-        for i in range(N):
+        for i in range(self.N):
 
             if self.labels[i] == 0:
 
@@ -192,26 +195,29 @@ class Simulation:
 
             ax.add_patch(circle)
 
-    def get_fit_input(self):
+    def get_data(self):
 
-        fit_input = collections.OrderedDict()
+        data = collections.OrderedDict()
 
-        fit_input["N"] = self.N
-        fit_input["Edet"] = self.Edet.to(u.GeV).value
-        fit_input["det_dir"] = self.det_dir
+        data["N"] = self.N
+        data["Edet"] = self.Edet.to(u.GeV).value
+        data["det_dir"] = self.det_dir
 
-        fit_input["source_dir"] = self.source_dir
-        fit_input["D"] = self.D.to(u.m).value
-        fit_input["z"] = self.z
-        fit_input["z_bg"] = self.z_bg
-        fit_input["Emin"] = self.Emin.to(u.GeV).value
-        fit_input["Emax"] = self.Emax.to(u.GeV).value
+        data["source_dir"] = self.source_dir
+        if self.L == 0: # no source
+            luminosity_distance(self.z)
+        else:
+            data["D"] = self.point_source.D.to(u.m).value
+        data["z"] = self.z
+        data["z_bg"] = self.z_bg
+        data["Emin"] = self.Emin.to(u.GeV).value
+        data["Emax"] = self.Emax.to(u.GeV).value
 
-        fit_input["T"] = self.time.to(u.s).value
-        fit_input["kappa"] = self.kappa
-        fit_input["aeff"] = self.effective_area.to(u.m ** 2).value
+        data["T"] = self.time.to(u.s).value
+        data["kappa"] = self.kappa
+        data["aeff"] = self.effective_area.to(u.m ** 2).value
 
-        return fit_input
+        return data
 
     def _get_N_expected(self):
         """
@@ -231,12 +237,32 @@ class Simulation:
 
         # Weights for sampling
         Nex = Nex_ps.value + Nex_bg.value
-        weights = [Nex_ps.value / Nex, Nex_bg.value / Nex]
+        weights = [Nex_ps.value / Nex,
+                   Nex_bg.value / Nex]
 
         self.Nex_ps = Nex_ps.value
         self.Nex_bg = Nex_bg.value
 
         return Nex, weights
+
+    def _get_time_weights(self):
+        """
+        calculate the expected time (dummy) and weights
+        """
+        ps_int = self.point_source.integrate(self.Emin, self.Emax)
+        bg_int = self.diffuse_bg.integrate(self.Emin, self.Emax)
+        tot_flux = ps_int + bg_int
+        
+        weights = [ps_int / tot_flux,
+                   bg_int / tot_flux]
+        
+        self.N_ps = self.N * weights[0]
+        self.N_bg = self.N * weights[1]
+
+        aeff = self.effective_area.to(u.cm ** 2)
+        time = (self.N_bg / (bg_int * aeff)).to(u.yr)
+
+        return time, weights
 
     def _get_associated_fraction(self):
         """
@@ -248,191 +274,3 @@ class Simulation:
         F_int_bg = self.diffuse_bg.integrate(self.Emin, self.Emax)
 
         return F_int_ps / (F_int_bg + F_int_ps)
-
-    def _get_norm(self):
-        """
-        Get power law spectrum normalisation.
-        """
-
-        if self.gamma == 2:
-
-            int_norm = 1 / np.power(self.Enorm, -self.gamma)
-            power_int = int_norm * np.log(self.Emax / self.Emin)
-
-        else:
-
-            int_norm = 1 / (np.power(self.Enorm, -self.gamma) * (2 - self.gamma))
-            power_int = int_norm * (
-                np.power(self.Emax, 2 - self.gamma)
-                - np.power(self.Emin, 2 - self.gamma)
-            )
-
-        return self.F / power_int
-
-
-
-
-class BackgroundSim:
-    """
-    Simulate with no source, with some added functionality.
-    """
-
-    @u.quantity_input
-    def __init__(
-        self,
-        F_diff_norm: 1 / (u.GeV * u.cm ** 2 * u.s),
-        gamma: float,
-        z: float = 1,
-        Emin: u.GeV = 1e5,
-        Emax: u.GeV = 1e8,
-        Enorm: u.GeV = 1e5,
-        time: u.yr = 10
-    ):
-        """
-        :param gamma: Spectral index of source
-        :param z: Redshift of BG
-        :param F_diff_norm: Diffuse backround flux at Emin
-        :param Emin: Minimum energy
-        :param Emax: Maximum energy
-        :param Enorm: Normalisation energy
-        """
-
-        self.gamma = gamma
-        self.z = z
-        self.F_diff_norm = F_diff_norm
-        self.Emin = Emin
-        self.Emax = Emax
-        self.Enorm = Enorm
-        self.time = time
-
-        #  Compute some useful quantities
-        self.D = luminosity_distance(self.z)
-        
-        self.diffuse_bg = PowerLaw(
-            self.F_diff_norm, self.Emin, self.Emax, self.Enorm, self.gamma
-        )
-
-        # Assume simple constant effective area for now
-        self.effective_area = 1 * u.m ** 2
-        self.ang_reco_err = 6 * u.deg
-
-        # Store truth for comparison with fits in appropriate units
-        self.truth = collections.OrderedDict()
-        self.truth["gamma"] = self.gamma
-        self.truth["F_diff"] = (
-            self.diffuse_bg.integrate(self.Emin, self.Emax)
-            .to(1 / (u.s * u.m ** 2))
-            .value
-        )
-
-    def run(self, seed=98):
-        """
-        Run simulation.
-        """
-
-        # Set seed
-        np.random.seed(seed)
-
-        Nex = self._get_N_expected()
-
-        N = np.random.poisson(Nex)
-        print("Simulating %i 'Background' events..." % N)
-        self.N = N
-
-        # Convert angular error to vMF kappa
-        self.kappa = 7552 * np.power(self.ang_reco_err.value, -2)
-
-        self.Etrue = np.zeros(N) * u.GeV
-        self.Earr = np.zeros(N) * u.GeV
-        self.Edet = np.zeros(N) * u.GeV
-        self.true_dir = np.zeros((N, 3))
-        self.det_dir = np.zeros((N, 3))
-
-        for i in range(N):
-            self.Etrue[i] = self.diffuse_bg.sample()
-            self.Earr[i] = self.Etrue[i] / (1 + self.z)
-            self.true_dir[i] = sample_vMF(np.array([1, 0, 0]), 0, 1)
-            self.Edet[i] = np.random.lognormal(np.log(self.Earr[i].value), 0.5) * u.GeV
-            self.det_dir[i] = sample_vMF(self.true_dir[i], self.kappa, 1)
-
-        # Convert unit vectors to coords
-        self.det_coord = SkyCoord(
-            self.det_dir.T[0],
-            self.det_dir.T[1],
-            self.det_dir.T[2],
-            representation_type="cartesian",
-            frame="icrs",
-        )
-        self.det_coord.representation_type = "spherical"
-
-        print("Done!")
-
-    def show_spectrum(self):
-        """
-        Show simulated spectrum.
-        """
-
-        bins = 10 ** np.linspace(
-            np.log10(self.Emin.value) - 1, np.log10(self.Emax.value)
-        )
-
-        fig, ax = plt.subplots()
-        ax.hist(self.Etrue.value, bins=bins, alpha=0.7, label="Etrue")
-        ax.hist(self.Earr.value, bins=bins, alpha=0.7, label="Earr")
-        ax.hist(self.Edet.value, bins=bins, alpha=0.7, label="Edet")
-        ax.set_xscale("log")
-        ax.legend()
-
-    def show_skymap(self):
-        """
-        Show simulated directions.
-        """
-        fig, ax = plt.subplots(subplot_kw={"projection": "astro degrees mollweide"})
-        fig.set_size_inches((7, 5))
-
-        for ra, dec in zip(
-            self.det_coord.icrs.ra,
-            self.det_coord.icrs.dec
-        ):
-
-            circle = SphericalCircle(
-                (ra, dec),
-                self.ang_reco_err,
-                alpha=0.5,
-                transform=ax.get_transform("icrs"),
-            )
-
-            ax.add_patch(circle)
-
-    def get_data(self):
-
-        info = collections.OrderedDict()
-
-        info["N"] = self.N
-        info["Edet"] = self.Edet.to(u.GeV).value
-        info["det_dir"] = self.det_dir
-
-        info["D"] = self.D.to(u.m).value
-        info["z"] = self.z
-        info["Emin"] = self.Emin.to(u.GeV).value
-        info["Emax"] = self.Emax.to(u.GeV).value
-
-        info["T"] = self.time.to(u.s).value
-        info["kappa"] = self.kappa
-        info["aeff"] = self.effective_area.to(u.m ** 2).value
-
-        return info
-
-    def _get_N_expected(self):
-        """
-        Calculate the expected number of events.
-        """
-
-        time = self.time.to(u.s)
-        aeff = self.effective_area.to(u.cm ** 2)
-
-        # diffuse bg
-        bg_int = self.diffuse_bg.integrate(self.Emin, self.Emax)
-        Nex_bg = time * aeff * bg_int
-
-        return Nex_bg
