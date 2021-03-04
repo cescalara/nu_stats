@@ -143,7 +143,7 @@ def unit_vectors_skymap(unit_vector_dir: np.ndarray, labels: np.ndarray = None):
             )
             ax.add_patch(circle)
     else:
-        label_cmap = plt.cm.tab10(list(range(2)))
+        label_cmap = plt.cm.Set1(list(range(2)))
         for ra, dec, l in zip(
             coords.icrs.ra,
             coords.icrs.dec,
