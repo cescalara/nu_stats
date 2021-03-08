@@ -1,3 +1,4 @@
+from typing import Counter
 import numpy as np
 from astropy.visualization.wcsaxes.patches import _rotate_polygon
 from matplotlib.patches import PathPatch
@@ -130,11 +131,14 @@ def unit_vectors_skymap(unit_vector_dir: np.ndarray, labels: np.ndarray = None):
 
     fig, ax = plt.subplots(subplot_kw={"projection": "astro degrees mollweide"})
     fig.set_size_inches((7, 5))
+    count = 0
     if labels is None:
         for ra, dec in zip(
             coords.icrs.ra,
             coords.icrs.dec,
         ):
+            count += 1
+            if count>= 1000: continue
             circle = SphericalCircle(
                 (ra, dec),
                 3 * u.deg,
@@ -149,6 +153,8 @@ def unit_vectors_skymap(unit_vector_dir: np.ndarray, labels: np.ndarray = None):
             coords.icrs.dec,
             labels,
         ):
+            count += 1
+            if count>= 1000: continue
             circle = SphericalCircle(
                 (ra, dec),
                 3 * u.deg,
@@ -157,4 +163,5 @@ def unit_vectors_skymap(unit_vector_dir: np.ndarray, labels: np.ndarray = None):
                 transform=ax.get_transform("icrs"),
             )
             ax.add_patch(circle)
+
     return coords, labels
