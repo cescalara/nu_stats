@@ -18,7 +18,7 @@ class PowerLaw:
         Emax: u.GeV,
         Enorm: u.GeV,
         *,
-        norm: 1 / (u.GeV * u.cm ** 2 * u.s) = np.nan/ (u.GeV * u.cm ** 2 * u.s),
+        Flnorm: 1 / (u.GeV * u.cm ** 2 * u.s) = np.nan/ (u.GeV * u.cm ** 2 * u.s),
         L: u.erg / u.s = np.nan * u.erg / u.s,
         z: float = np.nan,
     ):
@@ -28,11 +28,11 @@ class PowerLaw:
             Emin (u.GeV): Min energy
             Emax (u.GeV): Max energy
             Enorm (u.GeV): Normalisation energy
-            norm (1, optional): flux at Emin. Defaults to nan, for which it is retrieved through L
+            Flnorm (1 / (u.GeV * u.cm ** 2 * u.s), optional): flux at enorm. Defaults to nan, for which it is retrieved through L
             L (u.erg, optional): Source luminosity. Defaults to nan, for which above is used
             z (float, optional): Source redshift. Defaults to np.nan.
         """
-        assert np.isnan(L) != np.isnan(norm), 'Pass either norm or L, not both'
+        assert np.isnan(L) != np.isnan(Flnorm), 'Pass either Flnorm or L, not both'
         assert np.isnan(L) == np.isnan(z), 'Pass the source redshift'
 
         # (*) Manual quantity check
@@ -40,7 +40,7 @@ class PowerLaw:
         assert Emin.unit == 'GeV'
         assert Emin.unit == 'GeV'
         assert Enorm.unit == 'GeV'
-        assert norm.unit == '1 / (cm2 GeV s)'
+        assert Flnorm.unit == '1 / (cm2 GeV s)'
         assert L.unit == 'erg / s'
         assert isinstance(z, float)
 
@@ -50,14 +50,14 @@ class PowerLaw:
         self.Enorm = Enorm
         self.L = L
         self.z = z
-        if np.isnan(norm): 
+        if np.isnan(Flnorm): 
             #  Compute some useful quantities
             self.D = luminosity_distance(self.z)
             self.F = self.L / (4 * np.pi * self.D ** 2)
             self.F = self.F.to(u.GeV / (u.cm ** 2 * u.s))
-            self.norm = self._get_norm()
+            self.Flnorm = self._get_norm()
         else:
-            self.norm = norm
+            self.Flnorm = Flnorm
 
         self.power_law_model = BoundedPowerLaw(
             self.gamma, self.Emin.value, self.Emax.value
@@ -69,7 +69,7 @@ class PowerLaw:
         dN/dEdAdt
         """
 
-        return self.norm * np.power(E, -self.gamma)
+        return self.Flnorm * np.power(E, -self.gamma)
 
     @u.quantity_input
     def integrate(self, Emin, Emax):
@@ -77,7 +77,7 @@ class PowerLaw:
         Integrate the power law between Emin and Emax.
         """
 
-        int_norm = self.norm / (np.power(self.Enorm, -self.gamma) * (1 - self.gamma))
+        int_norm = self.Flnorm / (np.power(self.Enorm, -self.gamma) * (1 - self.gamma))
 
         return int_norm * (
             np.power(Emax, 1 - self.gamma) - np.power(Emin, 1 - self.gamma)

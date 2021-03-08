@@ -54,7 +54,7 @@ class Simulation:
             self.gamma, self.Emin, self.Emax, self.Enorm, L = self.L, z = self.z
         )
         self.diffuse_bg = PowerLaw(
-            self.gamma, self.Emin, self.Emax, self.Enorm, norm = self.F_diff_norm
+            self.gamma, self.Emin, self.Emax, self.Enorm, Flnorm = self.F_diff_norm
         )
         self.f = self._get_associated_fraction()
         self.z_bg = 1.0  # Assume background at redshift 1
@@ -173,17 +173,19 @@ class Simulation:
         """
         Show simulated directions.
         """
-
         label_cmap = plt.cm.Set1(list(range(2)))
 
         fig, ax = plt.subplots(subplot_kw={"projection": "astro degrees mollweide"})
         fig.set_size_inches((7, 5))
 
+        counter = 0
         for ra, dec, l in zip(
             self.det_coord.icrs.ra,
             self.det_coord.icrs.dec,
             self.labels,
         ):
+            counter +=1 
+            if counter >100: break
 
             circle = SphericalCircle(
                 (ra, dec),
