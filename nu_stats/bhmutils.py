@@ -23,7 +23,7 @@ def classify_events(fit_input, fit):
         lps = [] # unnormalized association prob
         ps = [] # association prob
         for src in range(n_comps):
-            lps.append(np.sum(np.exp(lp[src]))) 
+            lps.append(np.sum(np.exp(lp[src]))) # Basically E[log_prob]
         norm = sum(lps)
 
         for src in range(n_comps):

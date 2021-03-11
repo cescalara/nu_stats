@@ -96,12 +96,11 @@ class Simulation:
 
         if not self.N:
             Nex, weights = self._get_N_expected()
-
             N = np.random.poisson(Nex)
-            print("Simulating %i events..." % N)
             self.N = N
         else:
             self.time, weights = self._get_time_weights()
+        print(f"Simulating {self.N} events...", end='\r')
 
         # Get source direction as a unit vector
         self.coord.representation_type = "cartesian"
@@ -151,7 +150,7 @@ class Simulation:
         )
         self.det_coord.representation_type = "spherical"
 
-        print("Done!")
+        print(f"Simulated {self.N} events")
 
     def show_spectrum(self):
         """

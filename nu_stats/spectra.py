@@ -28,8 +28,10 @@ class PowerLaw:
             Emin (u.GeV): Min energy
             Emax (u.GeV): Max energy
             Enorm (u.GeV): Normalisation energy
-            Flnorm (1 / (u.GeV * u.cm ** 2 * u.s), optional): flux at enorm. Defaults to nan, for which it is retrieved through L
-            L (u.erg, optional): Source luminosity. Defaults to nan, for which above is used
+            Flnorm (1 / (u.GeV * u.cm ** 2 * u.s), optional): flux at enorm.
+                Defaults to nan, for which it is retrieved through L
+            L (u.erg, optional): Source luminosity.
+                Defaults to nan, for which above is used
             z (float, optional): Source redshift. Defaults to np.nan.
         """
         assert np.isnan(L) != np.isnan(Flnorm), 'Pass either Flnorm or L, not both'
@@ -77,7 +79,8 @@ class PowerLaw:
         Integrate the power law between Emin and Emax.
         """
 
-        int_norm = self.Flnorm / (np.power(self.Enorm, -self.gamma) * (1 - self.gamma))
+        int_norm = self.Flnorm / (np.power(self.Enorm, -self.gamma)
+                                  * (1 - self.gamma))
 
         return int_norm * (
             np.power(Emax, 1 - self.gamma) - np.power(Emin, 1 - self.gamma)
