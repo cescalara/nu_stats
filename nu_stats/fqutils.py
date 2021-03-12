@@ -88,8 +88,8 @@ class MarginalisedEnergyLikelihood:
                 + str(self._max_index)
             )
 
-        i_index = np.digitize(new_index, self._index_bins) - 1
-        E_index = np.digitize(np.log10(E), self._energy_bins) - 1
+        i_index = np.digitize(new_index, self._index_bins) - 2
+        E_index = np.digitize(np.log10(E), self._energy_bins) - 2
 
         return self._likelihood[i_index][E_index]
 
@@ -104,6 +104,19 @@ class FqStructure:
         n_Esim: int = np.nan,
         E_seed = 123,
     ):
+        """
+        Class for holding useful stuff to do with the Braun paper approach  
+
+        No Args: Spacial model only, i.e. P(Edet|gamma)=1
+
+        Args: Properties for simulation for precomputing P(Edet|gamma)           
+            z (float, optional): Defaults to np.nan.
+            Emin (u.GeV, optional): Defaults to np.nan.
+            Emax (u.GeV, optional): Defaults to np.nan.
+            Esim_gamma (float, optional):  Defaults to np.nan.
+            n_Esim (int, optional): Defaults to np.nan.
+            E_seed (int, optional): Defaults to 123.
+        """    
         self.E_input_array = [z, Emin, Emax, Esim_gamma, n_Esim, E_seed]
         empty_entries = np.array([
             np.isnan(entry) for entry in self.E_input_array[:-1]
@@ -158,10 +171,10 @@ class FqStructure:
             obs_dir (np.ndarray): direction of observed neutrino
             kappa (float): uncertainty of neutrino direction in obs
         """
-        assert source_dir.shape[0] == 1, \
-            f'Source dir shape[0]={source_dir.shape[0]}, expected 1'
-        assert obs_dir.shape[0] == 1, \
-            f'Observation dir shape[0]={obs_dir.shape[0]}, expected 1'
+        assert source_dir.ndim == 1, \
+            f'source_dir.ndim = {source_dir.ndim}, expected 1'
+        assert obs_dir.ndim == 1, \
+            f'obs_dir.ndim = {obs_dir.ndim}, expected 1'
 
         spacial_factor = (kappa/np.pi
             * np.exp(-kappa
@@ -199,9 +212,9 @@ class FqStructure:
             for i in range(source_dir.shape[0]):
                 S += self.source_likelihood(
                     E_r[j],
-                    obs_dir[j:j+1,:],
+                    obs_dir[j],
                     gamma,
-                    source_dir[i:i+1,:],
+                    source_dir,
                     kappa
                     )
             TS[j] = 2*np.log(S / self.bg_likelihood(E_r[j], gamma))
@@ -221,19 +234,18 @@ class FqStructure:
         Returns:
             np.ndarray: 
         """    
-        s_dir = np.reshape(fit_input['source_dir'],(1,3))
         sim_TS = self.test_stat(
             fit_input['Edet'],
             fit_input['det_dir'],
             gamma,
-            s_dir,
+            fit_input['source_dir'],
             fit_input['kappa']
             )
         bg_TS = self.test_stat(
             bg_dat['Edet'],
             bg_dat['det_dir'],
             gamma,
-            s_dir,
+            fit_input['source_dir'],
             bg_dat['kappa']
             )
 
@@ -242,10 +254,44 @@ class FqStructure:
         for i,obs_TS in enumerate(sim_TS):
             sim_p[i] = (np.mean(bg_TS > obs_TS))
         return sim_TS, bg_TS, sim_p
-
     
+    def log_band_likelihood(self, fit_input, n_s, gamma):
+        '''
+        Returns log(L(x_s,n_s,gamma)) (7) to be maximized w.r.t. n_s and gamma
+        for their estimates.
+        i.e. sum_i(log(n_s/N S_i + (1-n_s/N) B_i)
+        '''
+        f = n_s/fit_input['N']
+        log_likelihoods = [np.log(
+            f * self.source_likelihood(
+                fit_input['Edet'][i],
+                fit_input['det_dir'][i],
+                gamma,
+                fit_input['source_dir'],
+                fit_input['kappa']
+                )
+            + (1-f) * self.bg_likelihood(fit_input['Edet'][i], gamma)
+            )
+            for i in range(fit_input['N'])
+        ]
+        return sum(log_likelihoods)
 
+    def grid_log_band_likelihood(self, fit_input, n_array, gamma_array):
+        assert n_array.ndim == 1
+        assert gamma_array.ndim == 1
+        grid = np.empty((n_array.size, gamma_array.size))
+        for i, n_s in enumerate(n_array):
+            for j, gamma in enumerate(gamma_array):
+                grid[i,j] = self.log_band_likelihood(fit_input, n_s, gamma)
+        return grid
 
+    def argmax_band_likelihood(self, fit_input, n_array, gamma_array):
+        """ Return likelihood-maximizing (n_s,gamma) combination, i.e. ^n_s, ^γ
+        """
+        grid = self.grid_log_band_likelihood(fit_input, n_array, gamma_array)
+        n_hat, g_hat = np.unravel_index(grid.argmax(), grid.shape)
+        return n_hat, g_hat
 
 def sqeuclidean(x):
     return np.inner(x, x).item()
+
