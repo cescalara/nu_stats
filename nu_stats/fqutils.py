@@ -14,7 +14,7 @@ class MarginalisedEnergyLikelihood:
         max_index=4.0,
         min_E: u.GeV = 1e3,
         max_E: u.GeV = 1e10,
-        Ebins=50,
+        Ebins = 50,
     ):
         """
         Compute the marginalised energy likelihood by using a 
@@ -183,8 +183,8 @@ class FqStructure:
                 ) # bivariate normal with kappa = 1/sigma^2
         
         energy_factor = self.energy_likelihood(E_r, gamma) # p(E_r|gamma)
-        #print('spacial', spacial_factor)
-        #print('energy ', energy_factor)
+        # print('spacial', spacial_factor)
+        # print('energy ', energy_factor)
         return spacial_factor * energy_factor
 
     def bg_likelihood(self, E_r, gamma):
@@ -262,6 +262,7 @@ class FqStructure:
         i.e. sum_i(log(n_s/N S_i + (1-n_s/N) B_i)
         '''
         f = n_s/fit_input['N']
+        # print(f)
         log_likelihoods = [np.log(
             f * self.source_likelihood(
                 fit_input['Edet'][i],
@@ -274,9 +275,10 @@ class FqStructure:
             )
             for i in range(fit_input['N'])
         ]
-        return sum(log_likelihoods)
+        return sum(log_likelihoods)#, log_likelihoods
 
     def grid_log_band_likelihood(self, fit_input, n_array, gamma_array):
+        assert fit_input['N'] >= n_array.max()
         assert n_array.ndim == 1
         assert gamma_array.ndim == 1
         grid = np.empty((n_array.size, gamma_array.size))
