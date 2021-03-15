@@ -184,7 +184,7 @@ class Simulation:
             self.labels,
         ):
             counter +=1 
-            if counter >100: break
+            if counter >1000: break
 
             circle = SphericalCircle(
                 (ra, dec),

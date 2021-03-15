@@ -80,7 +80,7 @@ class MarginalisedEnergyLikelihood:
 
         if new_index < self._min_index or new_index > self._max_index:
             raise ValueError(
-                "Sepctral index "
+                "Spectral index "
                 + str(new_index)
                 + " is not in the accepted range between "
                 + str(self._min_index)
@@ -170,8 +170,8 @@ class FqStructure:
                 sim_index = Esim_gamma,
                 min_index = Esim_gamma,
                 max_index = 4.0,
-                min_E = Emin.value/10, # Because Edet min can be lower than PL min
-                max_E = Emax.value*10, # Because Edet max can be higher than PL min
+                min_E = Emin.value/100, # Because Edet min can be lower than PL min
+                max_E = Emax.value*100, # Because Edet max can be higher than PL min
                 Ebins = 100,
             )
             print('Marginalized energy likelihood generated.')
@@ -385,7 +385,7 @@ class FqStructure:
                                         self.lbl_grid.shape)
         return n_hat_idx, g_hat_idx
     
-    def show_lbl_contour(self):
+    def plot_lbl_contour(self, show = False):
         if not hasattr(self, 'lbl_grid'):
             raise AttributeError(
                 'Missing previous grid_log_band_likelihood call'
@@ -397,7 +397,7 @@ class FqStructure:
         n_h_i, g_h_i = self.argmax_band_likelihood()
         plt.scatter(self._gammas[g_h_i],self._n_ss[n_h_i], marker='x', c ='r')
         plt.title('Band log-likelihhod vs spectral index and n_s')
-        plt.show()
+        if show: plt.show()
 
 def sqeuclidean(x):
     return np.inner(x, x).item()
