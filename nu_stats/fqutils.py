@@ -90,26 +90,35 @@ class MarginalisedEnergyLikelihood:
                 + str(self._max_index)
             )
 
-        i_index = np.digitize(new_index, self._index_bins) - 2
-        E_index = np.digitize(np.log10(E), self._energy_bins) - 2
+        if E == self._max_E:
+            E_index = len(self._energy_bins)-2
+        else:
+            E_index = np.digitize(np.log10(E), self._energy_bins)-1
+
+        if new_index == self._max_index:
+            i_index = len(self._index_bins)-2
+        else:
+            i_index = np.digitize(new_index, self._index_bins)-1
+
         # TODO : interpolate?
-        # TODO : check binning
         return self._likelihood[i_index][E_index]
     
     def plot_pdf_at_idx(self, index):
         Es = np.logspace(np.log10(self._min_E),
                  np.log10(self._max_E),10000)
         ll = [self(E,index) for E in Es]
-        plt.plot(Es, ll)
+        p = plt.plot(Es, ll)
         plt.xscale('log')
-        plt.yscale('log')
+        # plt.yscale('log')
+        return p
 
     def plot_pdf_at_E(self, E):
-        idx = np.linspace(self._min_index+0.1,
+        idx = np.linspace(self._min_index,
                  self._max_index,10000)
         ll = [self(E,index) for index in idx]
-        plt.plot(idx, ll)
-        plt.yscale('log')
+        p = plt.plot(idx, ll)
+        # plt.yscale('log')
+        return p
     
     def plot_pdf_meshgrid(self):
         idx = np.linspace(self._min_index+0.1,
@@ -468,3 +477,8 @@ class FqStructure:
 def sqeuclidean(x):
     return np.inner(x, x).item()
 
+def plot_loghist(x, bins):
+    _, bins = np.histogram(x, bins=bins)
+    logbins = np.logspace(np.log10(bins[0]),np.log10(bins[-1]),len(bins))
+    plt.hist(x, bins=logbins)
+    plt.xscale('log')
