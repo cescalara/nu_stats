@@ -2,6 +2,7 @@ from collections import OrderedDict
 import numpy as np
 from astropy import units as u
 from matplotlib import pyplot as plt
+from iminuit import Minuit
 
 from nu_stats.simulation import Simulation
 
@@ -15,7 +16,7 @@ class MarginalisedEnergyLikelihood:
         max_index = 4.0,
         min_E = 1e3,
         max_E = 1e10,
-        Ebins = 50,
+        Nbins = 50,
     ):
         """
         Compute the marginalised energy likelihood by using a 
@@ -35,9 +36,9 @@ class MarginalisedEnergyLikelihood:
         self._min_E = min_E
         self._max_E = max_E
 
-        self._index_bins = np.linspace(min_index, max_index)
+        self._index_bins = np.linspace(min_index, max_index, Nbins)
 
-        self._energy_bins = np.linspace(np.log10(min_E), np.log10(max_E), Ebins)  # GeV
+        self._energy_bins = np.linspace(np.log10(min_E), np.log10(max_E), Nbins)  # GeV
 
         self._precompute_histograms()
 
@@ -56,9 +57,10 @@ class MarginalisedEnergyLikelihood:
                 np.log10(self._energy),
                 bins=self._energy_bins,
                 weights=weights,
-                density=True,
+                density=True, 
             )
-
+            # because density=True, hist gives the value of the pdf at the bin,
+            # normalized such that the integral over the range is 1
             self._likelihood[i] = hist
 
     def _calc_weights(self, new_index):
@@ -90,18 +92,36 @@ class MarginalisedEnergyLikelihood:
 
         i_index = np.digitize(new_index, self._index_bins) - 2
         E_index = np.digitize(np.log10(E), self._energy_bins) - 2
-
+        # TODO : interpolate?
+        # TODO : check binning
         return self._likelihood[i_index][E_index]
     
-    def show_pdf_at_idx(self, index):
-
+    def plot_pdf_at_idx(self, index):
         Es = np.logspace(np.log10(self._min_E),
                  np.log10(self._max_E),10000)
         ll = [self(E,index) for E in Es]
         plt.plot(Es, ll)
         plt.xscale('log')
         plt.yscale('log')
-        plt.show()
+
+    def plot_pdf_at_E(self, E):
+        idx = np.linspace(self._min_index+0.1,
+                 self._max_index,10000)
+        ll = [self(E,index) for index in idx]
+        plt.plot(idx, ll)
+        plt.yscale('log')
+    
+    def plot_pdf_meshgrid(self):
+        idx = np.linspace(self._min_index+0.1,
+                 self._max_index,100)
+        Es = np.logspace(np.log10(self._min_E),
+                 np.log10(self._max_E),100)
+        Es, idx = np.meshgrid(Es, idx)
+        vfunc = np.vectorize(self.__call__)
+        Z = vfunc(Es, idx)
+        # np.savetxt("zeta.csv", Z, delimiter=",")
+        plt.pcolormesh(Es, idx, Z, shading='auto')
+        plt.xscale('log')
 
 
 
@@ -147,7 +167,7 @@ class FqStructure:
             self.energy_likelihood = lambda Edet, spectral_index: 1
             print('Marginalized energy likelihood taken to be 1.')
         else:
-            print('Generating marginalized energy likelihood..', end='\r')
+            print('Generating marginalized energy likelihood..')
             z, Emin, Emax, Esim_gamma, n_Esim, E_seed = self.E_input_array
             '''
             Because we only want a sample of Edet for a certain gamma with no
@@ -171,8 +191,8 @@ class FqStructure:
                 min_index = Esim_gamma,
                 max_index = 4.0,
                 min_E = Emin.value/100, # Because Edet min can be lower than PL min
-                max_E = Emax.value*100, # Because Edet max can be higher than PL min
-                Ebins = 100,
+                max_E = Emax.value,
+                Nbins = 50,
             )
             print('Marginalized energy likelihood generated.')
 
@@ -218,187 +238,233 @@ class FqStructure:
         else:
             return self.energy_likelihood(E_r, gamma) # p(E_r|gamma)
     
-    def test_stat(self,
-        E_r : np.ndarray, # Edets from sim
-        obs_dir: np.ndarray, # det_dir from sim
-        gamma: float,
-        source_dir: np.ndarray,
-        kappa: float # Detector
-    ):
-        N_obs = obs_dir.shape[0]
-        TS = np.empty(N_obs)
-        TS[:] = np.NaN
-        for j in range(N_obs):
-            S = 0
-            for i in range(source_dir.shape[0]):
-                S += self.source_likelihood(
-                    E_r[j],
-                    obs_dir[j],
-                    gamma,
-                    source_dir,
-                    kappa
-                    )
-            TS[j] = 2*np.log(S / self.bg_likelihood(E_r[j], gamma))
-        return TS
+    if True: # Foldable section for methods on individual events
+        def test_stat(self,
+            E_r : np.ndarray, # Edets from sim
+            obs_dir: np.ndarray, # det_dir from sim
+            gamma: float,
+            source_dir: np.ndarray,
+            kappa: float # Detector
+        ):
+            N_obs = obs_dir.shape[0]
+            TS = np.empty(N_obs)
+            TS[:] = np.NaN
+            for j in range(N_obs):
+                S = 0
+                for i in range(source_dir.shape[0]):
+                    S += self.source_likelihood(
+                        E_r[j],
+                        obs_dir[j],
+                        gamma,
+                        source_dir,
+                        kappa
+                        )
+                TS[j] = 2*np.log(S / self.bg_likelihood(E_r[j], gamma))
+            return TS
 
-    def event_statistics(self,
-        fit_input: OrderedDict,
-        bg_dat: OrderedDict,
-        gamma: float
-    ):
+        def event_statistics(self,
+            fit_input: OrderedDict,
+            bg_dat: OrderedDict,
+            gamma: float
+        ):
 
-        """Get p-values for fit_input events coming from bg
-        Args:
-            fit_input (OrderedDict): output from Simulation.get_data()
-            bg_dat (OrderedDict): output from background Simulation.get_data()
-            gamma (float): 
+            """Get p-values for fit_input events coming from bg
+            Args:
+                fit_input (OrderedDict): output from Simulation.get_data()
+                bg_dat (OrderedDict): output from background Simulation.get_data()
+                gamma (float): 
 
-        Returns:
-            np.ndarray: 
-        """
-        self.fit_input = fit_input
-
-        sim_TS = self.test_stat(
-            self.fit_input['Edet'],
-            self.fit_input['det_dir'],
-            gamma,
-            self.fit_input['source_dir'],
-            self.fit_input['kappa']
-            )
-        bg_TS = self.test_stat(
-            bg_dat['Edet'],
-            bg_dat['det_dir'],
-            gamma,
-            self.fit_input['source_dir'],
-            bg_dat['kappa']
-            )
-
-        ## get p values
-        sim_p = np.zeros_like(sim_TS)
-        for i,obs_TS in enumerate(sim_TS):
-            sim_p[i] = (np.mean(bg_TS > obs_TS))
-        return sim_TS, bg_TS, sim_p
-
-    def event_source_likelihood_from_index(self,
-        gamma_array: np.ndarray,
-        event_idx: int,
-        fit_input: OrderedDict = None
-    ):
-        if fit_input is not None:
+            Returns:
+                np.ndarray: 
+            """
             self.fit_input = fit_input
-        elif not hasattr(self, 'fit_input'):
-            raise AttributeError(
-            'fit_input not set, pass it as fourth arg, or\n\
-            enter it with set_fit_input, or set directly through self.fit_input'
-            )
 
-        assert event_idx < self.fit_input['N']
-        assert gamma_array.ndim == 1
-        self.sl_arr = np.empty(gamma_array.size)
-        for j, gamma in enumerate(gamma_array):
-            self.sl_arr[j] = self.source_likelihood(
-                                    self.fit_input['Edet'][event_idx],
-                                    self.fit_input['det_dir'][event_idx],
-                                    gamma,
-                                    self.fit_input['source_dir'],
-                                    self.fit_input['kappa']
-                                )
-        return self.sl_arr
-
-    def log_band_likelihood(self, n_s: int, gamma: float):
-        '''
-        Returns log(L(x_s,n_s,gamma)) (7) to be maximized w.r.t. n_s and gamma
-        for their estimates.
-        i.e. sum_i(log(n_s/N S_i + (1-n_s/N) B_i)
-        '''
-        if not hasattr(self, 'fit_input'):
-            raise AttributeError(
-        'fit_input not set, enter it with set_fit_input or directly through self.fit_input'
-        )
-
-        f = n_s/self.fit_input['N']
-        # print(f)
-        log_likelihoods = [np.log(
-            f * self.source_likelihood(
-                self.fit_input['Edet'][i],
-                self.fit_input['det_dir'][i],
+            sim_TS = self.test_stat(
+                self.fit_input['Edet'],
+                self.fit_input['det_dir'],
                 gamma,
                 self.fit_input['source_dir'],
                 self.fit_input['kappa']
                 )
-            + (1-f) * self.bg_likelihood(self.fit_input['Edet'][i], gamma)
-            )
-            for i in range(self.fit_input['N'])
-        ]
-        return sum(log_likelihoods)#, log_likelihoods
+            bg_TS = self.test_stat(
+                bg_dat['Edet'],
+                bg_dat['det_dir'],
+                gamma,
+                self.fit_input['source_dir'],
+                bg_dat['kappa']
+                )
 
-    def grid_log_band_likelihood(self,
-        n_array: np.ndarray,
-        gamma_array: np.ndarray,
-        fit_input: OrderedDict = None
-    ):
-        if fit_input is not None:
-            self.fit_input = fit_input
-        elif not hasattr(self, 'fit_input'):
-            raise AttributeError(
+            ## get p values
+            sim_p = np.zeros_like(sim_TS)
+            for i,obs_TS in enumerate(sim_TS):
+                sim_p[i] = (np.mean(bg_TS > obs_TS))
+            return sim_TS, bg_TS, sim_p
+
+        def event_source_likelihood_from_index(self,
+            gamma_array: np.ndarray,
+            event_idx: int,
+            fit_input: OrderedDict = None
+        ):
+            if fit_input is not None:
+                self.fit_input = fit_input
+            elif not hasattr(self, 'fit_input'):
+                raise AttributeError(
                 'fit_input not set, pass it as fourth arg, or\n\
                 enter it with set_fit_input, or set directly through self.fit_input'
                 )
-        
-        assert n_array.max() <= self.fit_input['N']
-        assert n_array.ndim == 1
-        assert gamma_array.ndim == 1
-        self.lbl_grid = np.empty((n_array.size, gamma_array.size))
-        for i, n_s in enumerate(n_array):
-            for j, gamma in enumerate(gamma_array):
-                self.lbl_grid[i,j] = self.log_band_likelihood(n_s, gamma)
-        self._n_ss = n_array
-        self._gammas = gamma_array
-        return self.lbl_grid
 
-    def argmax_band_likelihood(self,
-        n_array: np.ndarray = None,
-        gamma_array: np.ndarray = None,
-        fit_input: OrderedDict = None
-    ):
-        """ Return likelihood-maximizing (n_s,gamma) combination, i.e. ^n_s, ^γ
-        """
-        if n_array is None or gamma_array is None:
-            assert (n_array is None) == (gamma_array is None),\
-                'n_array and gamma_array must either both or none be passed'
-            assert fit_input is None,\
-                'leave None if same fit input, or pass arrays for n and gamma'
-            assert hasattr(self, 'lbl_grid'),\
-                'A grid of log band likelihoods is needed\n\
-                pass arrays of n and gamma'
-        elif fit_input is not None:
-            self.fit_input = fit_input
-        else:
+            assert event_idx < self.fit_input['N']
+            assert gamma_array.ndim == 1
+            self.sl_arr = np.empty(gamma_array.size)
+            for j, gamma in enumerate(gamma_array):
+                self.sl_arr[j] = self.source_likelihood(
+                                        self.fit_input['Edet'][event_idx],
+                                        self.fit_input['det_dir'][event_idx],
+                                        gamma,
+                                        self.fit_input['source_dir'],
+                                        self.fit_input['kappa']
+                                    )
+            return self.sl_arr
+    
+    if True: # Foldable section for methods on full band
+        def log_band_likelihood(self, n_s: int, gamma: float):
+            '''
+            Returns log(L(x_s,n_s,gamma)) (7) to be maximized w.r.t. n_s and gamma
+            for their estimates.
+            i.e. sum_i(log(n_s/N S_i + (1-n_s/N) B_i)
+            '''
             if not hasattr(self, 'fit_input'):
+                raise AttributeError(
+            'fit_input not set, enter it with set_fit_input or directly through self.fit_input'
+            )
+
+            f = n_s/self.fit_input['N']
+            # print(f)
+            log_likelihoods = [np.log(
+                f * self.source_likelihood(
+                    self.fit_input['Edet'][i],
+                    self.fit_input['det_dir'][i],
+                    gamma,
+                    self.fit_input['source_dir'],
+                    self.fit_input['kappa']
+                    )
+                + (1-f) * self.bg_likelihood(self.fit_input['Edet'][i], gamma)
+                )
+                for i in range(self.fit_input['N'])
+            ]
+            return sum(log_likelihoods)#, log_likelihoods
+
+        def _neg_lbl(self, n_s, gamma):
+            return -self.log_band_likelihood(n_s, gamma)
+
+        def minimize_neg_lbl(self):
+            """
+            Minimize -log(likelihood_ratio) for the source hypothesis, 
+            returning the best fit ns and index.
+            Uses the iMiuint wrapper.
+            """
+            if isinstance(self.energy_likelihood, MarginalisedEnergyLikelihood):
+                init_index = np.mean((self.energy_likelihood._min_index,
+                                      self.energy_likelihood._max_index))
+            else: # Spacial only
+                init_index = 0 # anything should work here
+            init_ns = int(np.arange(self.fit_input['N']).mean())
+
+            m = Minuit(self._neg_lbl,
+                n_s = init_ns,
+                gamma = init_index)
+
+            m.errors = [1, 0.1]
+            m.errordef = Minuit.LIKELIHOOD # 0.5
+            
+            if isinstance(self.energy_likelihood, MarginalisedEnergyLikelihood):
+                m.limits = [(0, self.fit_input['N']-1),
+                            (self.energy_likelihood._min_index+0.1,
+                             self.energy_likelihood._max_index)]
+            else:
+                m.fixed['gamma'] = True
+                m.limits = [(0, self.fit_input['N']-1),
+                            (None,None)]
+
+            m.migrad()
+
+            self._best_fit_ns = m.values["n_s"]
+            self._best_fit_index = m.values["gamma"]
+            return m, self._best_fit_ns, self._best_fit_index
+
+        def grid_log_band_likelihood(self,
+            n_array: np.ndarray,
+            gamma_array: np.ndarray,
+            fit_input: OrderedDict = None
+        ):
+            if fit_input is not None:
+                self.fit_input = fit_input
+            elif not hasattr(self, 'fit_input'):
                 raise AttributeError(
                     'fit_input not set, pass it as fourth arg, or\n\
                     enter it with set_fit_input, or set directly through self.fit_input'
                     )
-            self.grid_log_band_likelihood(n_array, gamma_array)
+            
+            assert n_array.max() <= self.fit_input['N']
+            assert n_array.ndim == 1
+            assert gamma_array.ndim == 1
+            self.lbl_grid = np.empty((n_array.size, gamma_array.size))
+            for i, n_s in enumerate(n_array):
+                for j, gamma in enumerate(gamma_array):
+                    self.lbl_grid[i,j] = self.log_band_likelihood(n_s, gamma)
+            self._n_ss = n_array
+            self._gammas = gamma_array
+            return self.lbl_grid
 
-        n_hat_idx, g_hat_idx = np.unravel_index(self.lbl_grid.argmax(),
-                                        self.lbl_grid.shape)
-        return n_hat_idx, g_hat_idx
-    
-    def plot_lbl_contour(self, show = False):
-        if not hasattr(self, 'lbl_grid'):
-            raise AttributeError(
-                'Missing previous grid_log_band_likelihood call'
-                )
-        plt.contour(self._gammas,self._n_ss, self.lbl_grid, 10)
-        plt.xlabel('γ')
-        plt.ylabel('n_s')
-        plt.colorbar()
-        n_h_i, g_h_i = self.argmax_band_likelihood()
-        plt.scatter(self._gammas[g_h_i],self._n_ss[n_h_i], marker='x', c ='r')
-        plt.title('Band log-likelihhod vs spectral index and n_s')
-        if show: plt.show()
+        def argmax_band_likelihood(self,
+            n_array: np.ndarray = None,
+            gamma_array: np.ndarray = None,
+            fit_input: OrderedDict = None
+        ):
+            """ Return likelihood-maximizing (n_s,gamma) combination, i.e. ^n_s, ^γ
+            """
+            if n_array is None or gamma_array is None:
+                assert (n_array is None) == (gamma_array is None),\
+                    'n_array and gamma_array must either both or none be passed'
+                assert fit_input is None,\
+                    'leave None if same fit input, or pass arrays for n and gamma'
+                assert hasattr(self, 'lbl_grid'),\
+                    'A grid of log band likelihoods is needed\n\
+                    pass arrays of n and gamma'
+            elif fit_input is not None:
+                self.fit_input = fit_input
+            else:
+                if not hasattr(self, 'fit_input'):
+                    raise AttributeError(
+                        'fit_input not set, pass it as fourth arg, or\n\
+                        enter it with set_fit_input, or set directly through self.fit_input'
+                        )
+                self._n_ss = n_array
+                self._gammas = gamma_array
+                self.grid_log_band_likelihood(n_array, gamma_array)
 
+            n_hat_idx, g_hat_idx = np.unravel_index(self.lbl_grid.argmax(),
+                                            self.lbl_grid.shape)
+            self._grid_best_fit_ns = self._n_ss[n_hat_idx]
+            self._grid_best_fit_index = self._gammas[g_hat_idx]
+            return self._grid_best_fit_ns, self._grid_best_fit_index
+        
+        def plot_lbl_contour(self, show = False):
+            if not hasattr(self, 'lbl_grid'):
+                raise AttributeError(
+                    'Missing previous grid_log_band_likelihood call'
+                    )
+            plt.contour(self._gammas,self._n_ss, self.lbl_grid, 10)
+            plt.xlabel('γ')
+            plt.ylabel('n_s')
+            plt.colorbar()
+            n_h, g_h = self.argmax_band_likelihood()
+            plt.scatter(g_h, n_h, marker='x', c ='r')
+            plt.title('Band log-likelihhod vs spectral index and n_s')
+            if show: plt.show()
+
+
+## Helper Functions -----------------------------------------------------------
 def sqeuclidean(x):
     return np.inner(x, x).item()
 
