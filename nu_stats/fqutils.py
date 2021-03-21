@@ -3,6 +3,8 @@ import numpy as np
 from astropy import units as u
 from matplotlib import pyplot as plt
 from iminuit import Minuit
+from scipy.interpolate import interp2d
+
 
 from nu_stats.simulation import Simulation
 
@@ -37,18 +39,19 @@ class MarginalisedEnergyLikelihood:
         self._max_E = max_E
 
         self._index_bins = np.linspace(min_index, max_index, Nbins)
-
+        self._ibin_width = self._index_bins[1] - self._index_bins[0]
         self._energy_bins = np.linspace(np.log10(min_E), np.log10(max_E), Nbins)  # GeV
+        self._Ebin_width = self._energy_bins[1] - self._energy_bins[0]
+        self._Nbins = Nbins
 
         self._precompute_histograms()
+        self.interpol2dfunc = None
 
     def _precompute_histograms(self):
         self._likelihood = np.zeros(
             (len(self._index_bins[:-1]), len(self._energy_bins[:-1]))
         )
-
         for i, index in enumerate(self._index_bins[:-1]):
-
             index_center_bin = index + (self._index_bins[i + 1] - index) / 2
 
             weights = self._calc_weights(index_center_bin)
@@ -66,72 +69,124 @@ class MarginalisedEnergyLikelihood:
     def _calc_weights(self, new_index):
         return np.power(self._energy, self._sim_index - new_index)
 
-    def __call__(self, E, new_index):
+    def __call__(self, E, new_index, interpol = 2):
         """
         P(Ereco | index) = \int dEtrue P(Ereco | Etrue) P(Etrue | index)
         """
         if E < self._min_E or E > self._max_E:
             raise ValueError(
-                "Energy "
-                + str(E)
-                + "is not in the accepted range between "
-                + str(self._min_E)
-                + " and "
-                + str(self._max_E)
+                f"Energy {E} is not in the accepted range"
+                + f" between {self._min_E} and {self._max_E}"
             )
 
         if new_index < self._min_index or new_index > self._max_index:
             raise ValueError(
-                "Spectral index "
-                + str(new_index)
-                + " is not in the accepted range between "
-                + str(self._min_index)
-                + " and "
-                + str(self._max_index)
+                "Spectral index {new_index} is not in the accepted range"
+                + f" between {self._min_index} and {self._max_index}"
             )
-
-        if E == self._max_E:
-            E_index = len(self._energy_bins)-2
+        if interpol == 'special':
+            if self.interpol2dfunc is None:
+                self._make_interpolate()
+            return self.interpol2dfunc(np.log10(E), new_index)
         else:
-            E_index = np.digitize(np.log10(E), self._energy_bins)-1
+            if E == self._max_E:
+                E_index = self._Nbins-2
+            else:
+                E_index = np.digitize(np.log10(E), self._energy_bins)-1
 
-        if new_index == self._max_index:
-            i_index = len(self._index_bins)-2
+            if new_index == self._max_index:
+                i_index = self._Nbins-2
+            else:
+                i_index = np.digitize(new_index, self._index_bins)-1
+
+        if interpol == 1 or interpol == 2:
+            f0 = self._likelihood[i_index, E_index]
+            midE = self._energy_bins[E_index]+self._Ebin_width/2
+            leftE = np.log10(E) < midE
+            case = [None, E_index-1, E_index+1]
+            otherEi = case[(leftE * (E_index > 0))
+                            + 2 * ((not leftE) * (E_index < self._Nbins-2))]
+
+            if otherEi is None:
+                f1 = f0
+            else:
+                f1 = self._likelihood[i_index, otherEi]
+            
+            dE = ((np.log10(E) - midE) / self._Ebin_width)
+            dE -= 2*dE*leftE # switch sign if to the left
+
+            if interpol == 1:
+                # linear interpolation
+                return (1-dE)*f0 + (dE)*f1
+            
+            # interpol = 2
+            # bilinear interpolation
+            # f00, f01,f10,f11
+            f = [f0, f0, f0, f0]
+            midi = self._index_bins[i_index] + self._ibin_width/2
+            lefti = new_index < midi
+            case = [None, i_index-1, i_index+1]
+            otherii = case[(lefti * (i_index > 0))
+                            + 2 * ((not lefti) * (i_index < self._Nbins-2))]
+
+            if otherEi is not None:
+                f[1] = self._likelihood[i_index, otherEi]
+            if otherii is not None:
+                f[2] = self._likelihood[otherii, E_index]
+            if (otherEi is not None) and (otherii is not None):
+                f[3] = self._likelihood[otherii, otherEi]
+
+            di = ((new_index - midi) / self._ibin_width)
+            di -= 2*di*lefti
+
+            lik = (f[0] * (1-dE) * (1-di)
+                 + f[1] * dE * (1-di)
+                 + f[2] * (1-dE) * di
+                 + f[3] * dE * di)
+            
+            return lik
+
         else:
-            i_index = np.digitize(new_index, self._index_bins)-1
-
-        # TODO : interpolate?
-        return self._likelihood[i_index][E_index]
+            return self._likelihood[i_index, E_index]
     
-    def plot_pdf_at_idx(self, index):
+    def _make_interpolate(self):
+        idx = self._index_bins[1:] - np.diff(self._index_bins)/2
+        lEs = self._energy_bins[1:] - np.diff(self._energy_bins)/2
+        lEs, idx = np.meshgrid(lEs, idx)
+        vfunc = np.vectorize(self.__call__)
+        Z = vfunc(np.power(10,lEs), idx, False)
+        # plt.pcolormesh(Es, idx, Z, shading='auto')
+        f = interp2d(lEs, idx, Z, kind='linear', fill_value=0)
+        self.interpol2dfunc = f
+       
+    def plot_pdf_at_idx(self, index, interp=2):
         Es = np.logspace(np.log10(self._min_E),
                  np.log10(self._max_E),10000)
-        ll = [self(E,index) for E in Es]
+        ll = [self(E, index, interp) for E in Es]
         p = plt.plot(Es, ll)
         plt.xscale('log')
         # plt.yscale('log')
         return p
 
-    def plot_pdf_at_E(self, E):
+    def plot_pdf_at_E(self, E, interp=2):
         idx = np.linspace(self._min_index,
                  self._max_index,10000)
-        ll = [self(E,index) for index in idx]
+        ll = [self(E, index, interp) for index in idx]
         p = plt.plot(idx, ll)
         # plt.yscale('log')
         return p
     
-    def plot_pdf_meshgrid(self):
-        idx = np.linspace(self._min_index+0.1,
+    def plot_pdf_meshgrid(self, interp=2):
+        idx = np.linspace(self._min_index,
                  self._max_index,100)
         Es = np.logspace(np.log10(self._min_E),
                  np.log10(self._max_E),100)
         Es, idx = np.meshgrid(Es, idx)
         vfunc = np.vectorize(self.__call__)
-        Z = vfunc(Es, idx)
+        Z = vfunc(Es, idx, interp)
         # np.savetxt("zeta.csv", Z, delimiter=",")
         plt.pcolormesh(Es, idx, Z, shading='auto')
         plt.xscale('log')
-
 
 
 class FqStructure:
@@ -339,7 +394,7 @@ class FqStructure:
         def log_band_likelihood(self, n_s: int, gamma: float):
             '''
             Returns log(L(x_s,n_s,gamma)) (7) to be maximized w.r.t. n_s and gamma
-            for their estimates.
+            for thothereir estimates.
             i.e. sum_i(log(n_s/N S_i + (1-n_s/N) B_i)
             '''
             if not hasattr(self, 'fit_input'):
@@ -434,7 +489,7 @@ class FqStructure:
             """
             if n_array is None or gamma_array is None:
                 assert (n_array is None) == (gamma_array is None),\
-                    'n_array and gamma_array must either both or none be passed'
+                    'n_array and gamma_array must othereither both or none be passed'
                 assert fit_input is None,\
                     'leave None if same fit input, or pass arrays for n and gamma'
                 assert hasattr(self, 'lbl_grid'),\
