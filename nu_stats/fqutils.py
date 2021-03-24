@@ -3,8 +3,6 @@ import numpy as np
 from astropy import units as u
 from matplotlib import pyplot as plt
 from iminuit import Minuit
-from scipy.interpolate import interp2d
-
 
 from nu_stats.simulation import Simulation
 
@@ -19,6 +17,7 @@ class MarginalisedEnergyLikelihood:
         min_E = 1e3,
         max_E = 1e10,
         Nbins = 50,
+        z = 0
     ):
         """
         Compute the marginalised energy likelihood by using a 
@@ -44,6 +43,8 @@ class MarginalisedEnergyLikelihood:
         self._Ebin_width = self._energy_bins[1] - self._energy_bins[0]
         self._Nbins = Nbins
 
+        self.z = z
+
         self._precompute_histograms()
         self.interpol2dfunc = None
 
@@ -67,12 +68,26 @@ class MarginalisedEnergyLikelihood:
             self._likelihood[i] = hist
 
     def _calc_weights(self, new_index):
-        return np.power(self._energy, self._sim_index - new_index)
+        return np.power(self._energy, (self._sim_index - new_index))
+
+    def _other_index(self, bin_index:int, val_lt_bin_center:bool):
+        """
+        Args:
+            bin_index (int): index of bin value belongs to
+            val_lt_bin_center (bool): if the value is lower than that of the bin center
+
+        Returns:
+            None, bin_index-1 or bin_index+1 depending on index validity
+        """
+        cases = [None, bin_index-1, bin_index+1]
+        return cases[(val_lt_bin_center * (bin_index > 0))
+                    + 2 * ((not val_lt_bin_center) * (bin_index < self._Nbins-2))]
 
     def __call__(self, E, new_index, interpol = 2):
         """
         P(Ereco | index) = \int dEtrue P(Ereco | Etrue) P(Etrue | index)
         """
+
         if E < self._min_E or E > self._max_E:
             raise ValueError(
                 f"Energy {E} is not in the accepted range"
@@ -84,98 +99,90 @@ class MarginalisedEnergyLikelihood:
                 "Spectral index {new_index} is not in the accepted range"
                 + f" between {self._min_index} and {self._max_index}"
             )
-        if interpol == 'special':
-            if self.interpol2dfunc is None:
-                self._make_interpolate()
-            return self.interpol2dfunc(np.log10(E), new_index)
-        else:
-            if E == self._max_E:
-                E_index = self._Nbins-2
-            else:
-                E_index = np.digitize(np.log10(E), self._energy_bins)-1
 
-            if new_index == self._max_index:
-                i_index = self._Nbins-2
-            else:
-                i_index = np.digitize(new_index, self._index_bins)-1
+        # rescale E to counteract the effect of redshift
+        E = E*np.power((1+self.z),(self._sim_index - new_index))
+        
+        if E == self._max_E:
+            E_index = self._Nbins-2
+        else:
+            E_index = np.digitize(np.log10(E), self._energy_bins)-1
+
+        if new_index == self._max_index:
+            i_index = self._Nbins-2
+        else:
+            i_index = np.digitize(new_index, self._index_bins)-1
 
         if interpol == 1 or interpol == 2:
+            # perform linear interpolation between closest bins
             f0 = self._likelihood[i_index, E_index]
             midE = self._energy_bins[E_index]+self._Ebin_width/2
-            leftE = np.log10(E) < midE
-            case = [None, E_index-1, E_index+1]
-            otherEi = case[(leftE * (E_index > 0))
-                            + 2 * ((not leftE) * (E_index < self._Nbins-2))]
+            low_E = np.log10(E) < midE
+            otherEi = self._other_index(E_index, low_E)
 
             if otherEi is None:
                 f1 = f0
             else:
                 f1 = self._likelihood[i_index, otherEi]
-            
+
             dE = ((np.log10(E) - midE) / self._Ebin_width)
-            dE -= 2*dE*leftE # switch sign if to the left
+            dE -= 2*dE*low_E # switch sign if to the low
 
             if interpol == 1:
                 # linear interpolation
-                return (1-dE)*f0 + (dE)*f1
-            
-            # interpol = 2
-            # bilinear interpolation
-            # f00, f01,f10,f11
-            f = [f0, f0, f0, f0]
-            midi = self._index_bins[i_index] + self._ibin_width/2
-            lefti = new_index < midi
-            case = [None, i_index-1, i_index+1]
-            otherii = case[(lefti * (i_index > 0))
-                            + 2 * ((not lefti) * (i_index < self._Nbins-2))]
+                return (1-dE)*f0 + (dE)*f1 / self._Nbins
 
-            if otherEi is not None:
-                f[1] = self._likelihood[i_index, otherEi]
-            if otherii is not None:
-                f[2] = self._likelihood[otherii, E_index]
-            if (otherEi is not None) and (otherii is not None):
-                f[3] = self._likelihood[otherii, otherEi]
+            elif interpol == 2:
+                # bilinear interpolation
+                # f00, f01, f10, f11
+                f = [f0, f0, f0, f0]
+                midi = self._index_bins[i_index] + self._ibin_width/2
+                low_i = new_index < midi
+                otherii = self._other_index(i_index, low_i)
 
-            di = ((new_index - midi) / self._ibin_width)
-            di -= 2*di*lefti
+                if otherEi is not None:
+                    f[1] = self._likelihood[i_index, otherEi]
+                    f[3] = f[1] # will be kept if otherii is None
 
-            lik = (f[0] * (1-dE) * (1-di)
-                 + f[1] * dE * (1-di)
-                 + f[2] * (1-dE) * di
-                 + f[3] * dE * di)
-            
+                if otherii is not None:
+                    f[2] = self._likelihood[otherii, E_index]
+                    f[3] = f[2] # will be kept if otherEi is None
+
+                if (otherEi is not None) and (otherii is not None):
+                    f[3] = self._likelihood[otherii, otherEi]
+
+                di = ((new_index - midi) / self._ibin_width)
+                di -= 2*di*low_i
+
+                lik = (f[0] * (1-dE) * (1-di)
+                    + f[1] * dE * (1-di)
+                    + f[2] * (1-dE) * di
+                    + f[3] * dE * di) / self._Nbins
+
             return lik
 
         else:
             return self._likelihood[i_index, E_index]
-    
-    def _make_interpolate(self):
-        idx = self._index_bins[1:] - np.diff(self._index_bins)/2
-        lEs = self._energy_bins[1:] - np.diff(self._energy_bins)/2
-        lEs, idx = np.meshgrid(lEs, idx)
-        vfunc = np.vectorize(self.__call__)
-        Z = vfunc(np.power(10,lEs), idx, False)
-        # plt.pcolormesh(Es, idx, Z, shading='auto')
-        f = interp2d(lEs, idx, Z, kind='linear', fill_value=0)
-        self.interpol2dfunc = f
-       
-    def plot_pdf_at_idx(self, index, interp=2):
+
+    def plot_pdf_at_idx(self, index, interp=2, scaled_plot = True):
         Es = np.logspace(np.log10(self._min_E),
-                 np.log10(self._max_E),10000)
+                 np.log10(self._max_E), 10000)
         ll = [self(E, index, interp) for E in Es]
+        if interp and not scaled_plot:
+            ll = [l*self._Nbins for l in ll]
         p = plt.plot(Es, ll)
         plt.xscale('log')
-        # plt.yscale('log')
         return p
 
-    def plot_pdf_at_E(self, E, interp=2):
+    def plot_pdf_at_E(self, E, interp=2, scaled_plot = True):
         idx = np.linspace(self._min_index,
                  self._max_index,10000)
         ll = [self(E, index, interp) for index in idx]
+        if interp and not scaled_plot:
+            ll = [l*self._Nbins for l in ll]
         p = plt.plot(idx, ll)
-        # plt.yscale('log')
         return p
-    
+
     def plot_pdf_meshgrid(self, interp=2):
         idx = np.linspace(self._min_index,
                  self._max_index,100)
@@ -184,7 +191,7 @@ class MarginalisedEnergyLikelihood:
         Es, idx = np.meshgrid(Es, idx)
         vfunc = np.vectorize(self.__call__)
         Z = vfunc(Es, idx, interp)
-        # np.savetxt("zeta.csv", Z, delimiter=",")
+        # np.savetxt("pdfmesh.csv", Z, delimiter=",")
         plt.pcolormesh(Es, idx, Z, shading='auto')
         plt.xscale('log')
 
@@ -204,7 +211,8 @@ class FqStructure:
 
         No Args: Spatial model only, i.e. P(Edet|gamma) = 1
 
-        Args: Properties for simulation for precomputing P(Edet|gamma)           
+        Args: Properties for simulation for precomputing P(Edet|gamma),
+        passed to construct_source_energy_likelihood
             z (float, optional): Defaults to np.nan.
             Emin (u.GeV, optional): Defaults to np.nan.
             Emax (u.GeV, optional): Defaults to np.nan.
@@ -213,6 +221,16 @@ class FqStructure:
             E_seed (int, optional): Defaults to 123.
         """    
         self.E_input_array = [z, Emin, Emax, Esim_gamma, n_Esim, E_seed]
+        self.construct_source_energy_likelihood(*self.E_input_array)
+    
+    def construct_source_energy_likelihood(self,
+        z: float = np.nan,
+        Emin: u.GeV = np.nan,
+        Emax: u.GeV = np.nan,
+        Esim_gamma: float = np.nan,
+        n_Esim: int = np.nan,
+        E_seed = 123,
+    ):
         empty_entries = np.array([
             np.isnan(entry) for entry in self.E_input_array[:-1]
             ])
@@ -223,19 +241,13 @@ class FqStructure:
             In positional order, True means missing:
             {empty_entries}
             ''' 
-
-        self._construct_energy_likelihood()
-    
-    def _construct_energy_likelihood(self):
-        if self.spacial_only:
             self.energy_likelihood = lambda Edet, spectral_index: 1
             print('Marginalized energy likelihood taken to be 1.')
         else:
             print('Generating marginalized energy likelihood..')
-            z, Emin, Emax, Esim_gamma, n_Esim, E_seed = self.E_input_array
             '''
-            Because we only want a sample of Edet for a certain gamma with no
-            spacial factor, we can use a single source 
+            Because we only want a sample of Edet for a certain gamma, with no
+            regard for spacial factor, we can use a single source with any L.
             '''
             self.Esim = Simulation(
                 1*u.erg/u.s,
@@ -255,10 +267,48 @@ class FqStructure:
                 min_index = Esim_gamma,
                 max_index = 4.0,
                 min_E = Emin.value/100, # Because Edet min can be lower than PL min
-                max_E = Emax.value,
+                max_E = Emax.value*10,
                 Nbins = 50,
+                z = z
             )
             print('Marginalized energy likelihood generated.')
+
+    def construct_bg_energy_likelihood(self,
+        z: float = np.nan,
+        Emin: u.GeV = np.nan,
+        Emax: u.GeV = np.nan,
+        Esim_gamma: float = np.nan,
+        n_Esim: int = np.nan,
+        E_seed = 123
+    ):
+        print('Generating marginalized energy likelihood..')
+        '''
+        again we could use  we only want a sample of Edet for a certain gamma, with no
+        regard for spacial factor, we can use a single source with any L.
+        '''
+        self.bgEsim = Simulation(
+                0*u.erg/u.s,
+                Esim_gamma, 
+                z, 
+                1/(u.GeV * u.cm**2 * u.s), 
+                Emin, 
+                Emax, 
+                Emin, 
+                n_Esim)
+        self.bgEsim.run(seed = E_seed)
+        self.bgEsim_dat = self.Esim.get_data()
+
+        self.bg_energy_likelihood = MarginalisedEnergyLikelihood(
+            self.bgEsim_dat['Edet'],
+            sim_index = Esim_gamma,
+            min_index = Esim_gamma,
+            max_index = 4.0,
+            min_E = Emin.value/100, # Because Edet min can be lower than PL min
+            max_E = Emax.value*10,
+            Nbins = 50,
+            z = z
+        )
+        print('Separate marginalized energy likelihood generated for bg.')
 
     def set_fit_input(self, fit_input):
         self.fit_input = fit_input
@@ -288,8 +338,6 @@ class FqStructure:
                 ) # bivariate normal with kappa = 1/sigma^2
         
         energy_factor = self.energy_likelihood(E_r, gamma) # p(E_r|gamma)
-        # print('spacial', spacial_factor)
-        # print('energy ', energy_factor)
         return spacial_factor * energy_factor
 
     def bg_likelihood(self, E_r, gamma):
@@ -297,10 +345,14 @@ class FqStructure:
         If spacial is isotropic, normalisation doesn't matter
         since the TS is relative
         """
+        spacial_factor = 1/(4*np.pi) # uniform on sphere
         if self.spacial_only:
-            return 1
+            return spacial_factor
+        elif hasattr(self, 'bg_energy_likelihood'):
+            print('yes')
+            return spacial_factor * self.bg_energy_likelihood(E_r, gamma)
         else:
-            return self.energy_likelihood(E_r, gamma) # p(E_r|gamma)
+            return spacial_factor * self.energy_likelihood(E_r, gamma)
     
     if True: # Foldable section for methods on individual events
         def test_stat(self,
@@ -443,7 +495,7 @@ class FqStructure:
             
             if isinstance(self.energy_likelihood, MarginalisedEnergyLikelihood):
                 m.limits = [(0, self.fit_input['N']-1),
-                            (self.energy_likelihood._min_index+0.1,
+                            (self.energy_likelihood._min_index,
                              self.energy_likelihood._max_index)]
             else:
                 m.fixed['gamma'] = True
@@ -532,8 +584,9 @@ class FqStructure:
 def sqeuclidean(x):
     return np.inner(x, x).item()
 
-def plot_loghist(x, bins):
-    _, bins = np.histogram(x, bins=bins)
-    logbins = np.logspace(np.log10(bins[0]),np.log10(bins[-1]),len(bins))
-    plt.hist(x, bins=logbins)
+
+def plot_loghist(x, bins, *args, **kwargs):
+    logbins = np.logspace(np.log10(min(x)),np.log10(max(x)), bins+1)
+    h = plt.hist(x, bins=logbins, *args, **kwargs)[0:2]
     plt.xscale('log')
+    return h
