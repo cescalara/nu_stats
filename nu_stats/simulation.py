@@ -86,7 +86,7 @@ class Simulation:
         )
         self.truth["f"] = self.f
 
-    def run(self, seed=42):
+    def run(self, seed=42, verbose = False):
         """
         Run simulation.
         """
@@ -100,7 +100,8 @@ class Simulation:
             self.N = N
         else:
             self.time, weights = self._get_time_weights()
-        print(f"Simulating {self.N} events...", end='\r')
+        if verbose:
+            print(f"Simulating {self.N} events...", end='\r')
 
         # Get source direction as a unit vector
         self.coord.representation_type = "cartesian"
@@ -149,8 +150,8 @@ class Simulation:
             frame="icrs",
         )
         self.det_coord.representation_type = "spherical"
-
-        print(f"Simulated {self.N} events")
+        if verbose:
+            print(f"Simulated {self.N} events")
 
     def show_spectrum(self):
         """
