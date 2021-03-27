@@ -472,8 +472,7 @@ class FqStructure:
         def minimize_neg_lbl(self):
             """
             Minimize -log(likelihood_ratio) for the source hypothesis, 
-            returning the best fit ns and index.
-            Uses the iMiuint wrapper.
+            returning the Minuit object, best fit ns and index.
             """
             if isinstance(self.energy_likelihood, MarginalisedEnergyLikelihood):
                 init_index = np.mean((self.energy_likelihood._min_index,
@@ -503,6 +502,23 @@ class FqStructure:
             self._best_fit_ns = m.values["n_s"]
             self._best_fit_index = m.values["gamma"]
             return m, self._best_fit_ns, self._best_fit_index
+
+        def band_TS(self, n_hat, gamma_hat, gamma_0):
+            """Get test statistic for best fitting n_s and index
+
+            Args:
+                n_hat: best fitting n_s
+                gamma_hat: best fitting spectral index
+                gamma_0: best fitting spectral index for n_s fixed at 0
+
+            Returns:
+                float: value of test statistic λ.
+            """            
+            TS = -2 * (self.log_band_likelihood(0, gamma_0)
+                     - self.log_band_likelihood(n_hat, gamma_hat))
+            # first log_band term is null hypothesis and 
+            return TS
+
 
         def grid_log_band_likelihood(self,
             n_array: np.ndarray,
@@ -574,6 +590,7 @@ class FqStructure:
             plt.scatter(g_h, n_h, marker='x', c ='r')
             plt.title('Band log-likelihhod vs spectral index and n_s')
             if show: plt.show()
+        
 
 
 ## Helper Functions -----------------------------------------------------------
