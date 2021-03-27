@@ -10,14 +10,15 @@ from nu_stats.simulation import Simulation
 class MarginalisedEnergyLikelihood:
     def __init__(
         self,
-        energy,
-        sim_index = 1.5,
-        min_index = 1.5,
-        max_index = 4.0,
-        min_E = 1e3,
-        max_E = 1e10,
-        Nbins = 50,
-        z = 0
+        is_source:bool = True,
+        z:float = 0.0,
+        Emin:float = 1e3,
+        Emax:float = 1e10,
+        n_Esim:int = 10000,
+        min_index:float = 1.5,
+        max_index:float = 4.0,
+        Nbins:int = 50,
+        prefab_file:str = None
     ):
         """
         Compute the marginalised energy likelihood by using a 
@@ -27,26 +28,44 @@ class MarginalisedEnergyLikelihood:
         :param energy: Reconstructed muon energies (preferably many).
         :param sim_index: Spectral index of source spectrum in sim.
         """
+        self.is_source = is_source
+        self.z = z
 
-        self._energy = energy
-
-        self._sim_index = sim_index
         self._min_index = min_index
         self._max_index = max_index
 
-        self._min_E = min_E
-        self._max_E = max_E
+        self.Emin = Emin
+        self.Emax = Emax
+        self.n_Esim = n_Esim
+
+        self._min_E = Emin/100 # Because Edet min can be lower than PL min
+        self._max_E = Emax*10  # Because Edet max can be higher than PL max
 
         self._index_bins = np.linspace(min_index, max_index, Nbins)
         self._ibin_width = self._index_bins[1] - self._index_bins[0]
-        self._energy_bins = np.linspace(np.log10(min_E), np.log10(max_E), Nbins)  # GeV
+        self._energy_bins = np.linspace(np.log10(self._min_E),
+                                        np.log10(self._max_E),
+                                        Nbins)
         self._Ebin_width = self._energy_bins[1] - self._energy_bins[0]
         self._Nbins = Nbins
 
-        self.z = z
-
-        self._precompute_histograms()
-        self.interpol2dfunc = None
+        if prefab_file is None:
+            self._precompute_histograms()
+        else:
+            ''' 
+            It must be ensured that the other inputs are the same as those
+            that generated the likelihood matrix.
+            TODO: make this easier, through e.g. hdf or pkl
+            '''
+            with open(prefab_file, 'rb') as f:
+                self._likelihood = np.load(f)
+                assert self._likelihood.shape == (Nbins-1, Nbins-1)
+        
+    def save_histogram(self, filename:str = None):
+        if filename is None:
+            filename = f'tmp/{self.is_source}{self.z}_{self._Nbins}lik.npy'
+        with open(filename, 'wb') as f:
+            np.save(f, self._likelihood)
 
     def _precompute_histograms(self):
         self._likelihood = np.zeros(
@@ -54,21 +73,28 @@ class MarginalisedEnergyLikelihood:
         )
         for i, index in enumerate(self._index_bins[:-1]):
             index_center_bin = index + (self._index_bins[i + 1] - index) / 2
-
-            weights = self._calc_weights(index_center_bin)
+            print('\r', f'Running sim {i+1}/{self._Nbins-1}', end='')
+            Esim = self.Esim = Simulation(
+                self.is_source*u.erg/u.s,
+                index_center_bin, 
+                self.z, 
+                (1-self.is_source)/(u.GeV * u.cm**2 * u.s), 
+                self.Emin*u.GeV, 
+                self.Emax*u.GeV, 
+                self.Emin*u.GeV, # assune Enorm = Emin for now
+                self.n_Esim)
+            Esim.run(seed = i) # Not ideal seeding
+            energy = self.Esim.get_data()['Edet']
 
             hist, _ = np.histogram(
-                np.log10(self._energy),
+                np.log10(energy),
                 bins=self._energy_bins,
-                weights=weights,
                 density=True, 
             )
             # because density=True, hist gives the value of the pdf at the bin,
             # normalized such that the integral over the range is 1
             self._likelihood[i] = hist
-
-    def _calc_weights(self, new_index):
-        return np.power(self._energy, (self._sim_index - new_index))
+        print('\r')
 
     def _other_index(self, bin_index:int, val_lt_bin_center:bool):
         """
@@ -99,9 +125,6 @@ class MarginalisedEnergyLikelihood:
                 "Spectral index {new_index} is not in the accepted range"
                 + f" between {self._min_index} and {self._max_index}"
             )
-
-        # rescale E to counteract the effect of redshift
-        E = E*np.power((1+self.z),(self._sim_index - new_index))
         
         if E == self._max_E:
             E_index = self._Nbins-2
@@ -114,7 +137,11 @@ class MarginalisedEnergyLikelihood:
             i_index = np.digitize(new_index, self._index_bins)-1
 
         if interpol == 1 or interpol == 2:
-            # perform linear interpolation between closest bins
+            '''
+            Perform linear interpolation between closest bins.
+            This is needed for minos to work (mapping directly to historgam has
+            only dirac-like gradients)
+            '''
             f0 = self._likelihood[i_index, E_index]
             midE = self._energy_bins[E_index]+self._Ebin_width/2
             low_E = np.log10(E) < midE
@@ -130,7 +157,7 @@ class MarginalisedEnergyLikelihood:
 
             if interpol == 1:
                 # linear interpolation
-                return (1-dE)*f0 + (dE)*f1 / self._Nbins
+                return ((1-dE)*f0 + (dE)*f1) / self._Nbins
 
             elif interpol == 2:
                 # bilinear interpolation
@@ -197,15 +224,7 @@ class MarginalisedEnergyLikelihood:
 
 
 class FqStructure:
-    def __init__(
-        self,
-        z: float = np.nan,
-        Emin: u.GeV = np.nan,
-        Emax: u.GeV = np.nan,
-        Esim_gamma: float = np.nan,
-        n_Esim: int = np.nan,
-        E_seed = 123,
-    ):
+    def __init__(self):
         """
         Class for holding useful stuff to do with the Braun paper approach  
 
@@ -219,94 +238,66 @@ class FqStructure:
             Esim_gamma (float, optional):  Defaults to np.nan.
             n_Esim (int, optional): Defaults to np.nan.
             E_seed (int, optional): Defaults to 123.
-        """    
-        self.E_input_array = [z, Emin, Emax, Esim_gamma, n_Esim, E_seed]
-        self.construct_source_energy_likelihood(*self.E_input_array)
+        """
+        self.spacial_only = True # Spacial only until energy likelihoods are given
     
     def construct_source_energy_likelihood(self,
-        z: float = np.nan,
-        Emin: u.GeV = np.nan,
-        Emax: u.GeV = np.nan,
-        Esim_gamma: float = np.nan,
-        n_Esim: int = np.nan,
-        E_seed = 123,
-    ):
-        empty_entries = np.array([
-            np.isnan(entry) for entry in self.E_input_array[:-1]
-            ])
-        self.spacial_only = empty_entries.any()
-        if self.spacial_only:
-            assert empty_entries.all(), f'''
-            Missing arguments for energy sim.
-            In positional order, True means missing:
-            {empty_entries}
-            ''' 
-            self.energy_likelihood = lambda Edet, spectral_index: 1
-            print('Marginalized energy likelihood taken to be 1.')
-        else:
-            print('Generating marginalized energy likelihood..')
-            '''
-            Because we only want a sample of Edet for a certain gamma, with no
-            regard for spacial factor, we can use a single source with any L.
-            '''
-            self.Esim = Simulation(
-                1*u.erg/u.s,
-                Esim_gamma, 
-                z, 
-                0/(u.GeV * u.cm**2 * u.s), 
-                Emin, 
-                Emax, 
-                Emin, 
-                n_Esim)
-            self.Esim.run(seed = E_seed)
-            self.Esim_dat = self.Esim.get_data()
-
-            self.energy_likelihood = MarginalisedEnergyLikelihood(
-                self.Esim_dat['Edet'],
-                sim_index = Esim_gamma,
-                min_index = Esim_gamma,
-                max_index = 4.0,
-                min_E = Emin.value/100, # Because Edet min can be lower than PL min
-                max_E = Emax.value*10,
-                Nbins = 50,
-                z = z
-            )
-            print('Marginalized energy likelihood generated.')
-
-    def construct_bg_energy_likelihood(self,
-        z: float = np.nan,
-        Emin: u.GeV = np.nan,
-        Emax: u.GeV = np.nan,
-        Esim_gamma: float = np.nan,
-        n_Esim: int = np.nan,
-        E_seed = 123
+        z: float,
+        Emin: u.GeV,
+        Emax: u.GeV,
+        min_index: float,
+        max_index: float,
+        n_Esim: int,
+        prefab_likelihood_file: str = None
     ):
         print('Generating marginalized energy likelihood..')
         '''
-        again we could use  we only want a sample of Edet for a certain gamma, with no
+        Because we only want a sample of Edet for a certain gamma, with no
         regard for spacial factor, we can use a single source with any L.
         '''
-        self.bgEsim = Simulation(
-                0*u.erg/u.s,
-                Esim_gamma, 
-                z, 
-                1/(u.GeV * u.cm**2 * u.s), 
-                Emin, 
-                Emax, 
-                Emin, 
-                n_Esim)
-        self.bgEsim.run(seed = E_seed)
-        self.bgEsim_dat = self.Esim.get_data()
-
-        self.bg_energy_likelihood = MarginalisedEnergyLikelihood(
-            self.bgEsim_dat['Edet'],
-            sim_index = Esim_gamma,
-            min_index = Esim_gamma,
-            max_index = 4.0,
-            min_E = Emin.value/100, # Because Edet min can be lower than PL min
-            max_E = Emax.value*10,
+        self.energy_likelihood = MarginalisedEnergyLikelihood(
+            is_source = True,
+            z = z,
+            Emin = Emin.value,
+            Emax = Emax.value,
+            n_Esim = n_Esim,
+            min_index = min_index,
+            max_index = max_index,
             Nbins = 50,
-            z = z
+            prefab_file = prefab_likelihood_file
+        )
+        print('Marginalized energy likelihood generated.')
+
+    def construct_bg_energy_likelihood(self,
+        z: float,
+        Emin: u.GeV,
+        Emax: u.GeV,
+        min_index: float,
+        max_index: float,
+        n_Esim: int,
+        prefab_likelihood_file: str = None
+    ):
+        print('Generating marginalized background energy likelihood..')
+        '''
+        TODO: Because is_source=False here will make the reference
+        energy simulations be set to bg only and z in the Simulation input is
+        the source's redshift and the bg is hardcoded, z here won't actually do
+        anything, but can be good to keep in case of restructuring.
+        This comment is a warning that passing another z to the bg_EL will not
+        necessarily do anything.
+        As of 27th of March 1.0 is hardcoded as z_bg in Simulation so that is
+        the redshift that will go into the bg_MEL.
+        '''
+        self.bg_energy_likelihood = MarginalisedEnergyLikelihood(
+            is_source = False, 
+            z = z,
+            Emin = Emin.value,
+            Emax = Emax.value,
+            n_Esim = n_Esim,
+            min_index = min_index,
+            max_index = max_index,
+            Nbins = 50,
+            prefab_file = prefab_likelihood_file
         )
         print('Separate marginalized energy likelihood generated for bg.')
 
@@ -314,7 +305,7 @@ class FqStructure:
         self.fit_input = fit_input
 
     def source_likelihood(self,
-        E_r : float, # Event Edet
+        E_d : float, # Event Edet
         obs_dir: np.ndarray, # Event
         gamma: float, # Source
         source_dir: np.ndarray, # Source
@@ -322,8 +313,10 @@ class FqStructure:
     ):
         """ Evaluate source likelihood
         Args:
-            source_dir (np.ndarray): direction of source
+            E_d
             obs_dir (np.ndarray): direction of observed neutrino
+            gamma (float): spectral index
+            source_dir (np.ndarray): direction of source
             kappa (float): uncertainty of neutrino direction in obs
         """
         assert source_dir.ndim == 1, \
@@ -336,27 +329,30 @@ class FqStructure:
                     * sqeuclidean(source_dir - obs_dir)/2
                     )
                 ) # bivariate normal with kappa = 1/sigma^2
-        
-        energy_factor = self.energy_likelihood(E_r, gamma) # p(E_r|gamma)
-        return spacial_factor * energy_factor
+        if self.spacial_only:
+            return spacial_factor
+        else:
+            energy_factor = self.energy_likelihood(E_d, gamma) # p(E_d|gamma)
+            return spacial_factor * energy_factor
 
-    def bg_likelihood(self, E_r, gamma):
-        """
-        If spacial is isotropic, normalisation doesn't matter
-        since the TS is relative
+    def bg_likelihood(self, E_d, gamma):
+        """ Evaluate Bg likelihood
+        Args:
+            source_dir (np.ndarray): direction of source
+            obs_dir (np.ndarray): direction of observed neutrino
+            kappa (float): uncertainty of neutrino direction in obs
         """
         spacial_factor = 1/(4*np.pi) # uniform on sphere
         if self.spacial_only:
             return spacial_factor
-        elif hasattr(self, 'bg_energy_likelihood'):
-            print('yes')
-            return spacial_factor * self.bg_energy_likelihood(E_r, gamma)
         else:
-            return spacial_factor * self.energy_likelihood(E_r, gamma)
+            assert hasattr(self, 'bg_energy_likelihood'), 'Missing P(E_d|γ, bg)'
+            return spacial_factor * self.bg_energy_likelihood(E_d, gamma)
     
+
     if True: # Foldable section for methods on individual events
         def test_stat(self,
-            E_r : np.ndarray, # Edets from sim
+            E_d : np.ndarray, # Edets from sim
             obs_dir: np.ndarray, # det_dir from sim
             gamma: float,
             source_dir: np.ndarray,
@@ -369,13 +365,13 @@ class FqStructure:
                 S = 0
                 for i in range(source_dir.shape[0]):
                     S += self.source_likelihood(
-                        E_r[j],
+                        E_d[j],
                         obs_dir[j],
                         gamma,
                         source_dir,
                         kappa
                         )
-                TS[j] = 2*np.log(S / self.bg_likelihood(E_r[j], gamma))
+                TS[j] = 2*np.log(S / self.bg_likelihood(E_d[j], gamma))
             return TS
 
         def event_statistics(self,
