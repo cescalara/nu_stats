@@ -157,7 +157,8 @@ class MarginalisedEnergyLikelihood:
 
             if interpol == 1:
                 # linear interpolation
-                return ((1-dE)*f0 + (dE)*f1) / self._Nbins
+                lik = ((1-dE)*f0 + (dE)*f1)/ self._Nbins
+                return max(lik, 1e-10)
 
             elif interpol == 2:
                 # bilinear interpolation
@@ -186,7 +187,7 @@ class MarginalisedEnergyLikelihood:
                     + f[2] * (1-dE) * di
                     + f[3] * dE * di) / self._Nbins
 
-            return lik
+            return max(lik, 1e-10)
 
         else:
             return self._likelihood[i_index, E_index]
@@ -248,6 +249,7 @@ class FqStructure:
         min_index: float,
         max_index: float,
         n_Esim: int,
+        Nbins: int,
         prefab_likelihood_file: str = None
     ):
         print('Generating marginalized energy likelihood..')
@@ -263,9 +265,10 @@ class FqStructure:
             n_Esim = n_Esim,
             min_index = min_index,
             max_index = max_index,
-            Nbins = 50,
+            Nbins = Nbins,
             prefab_file = prefab_likelihood_file
         )
+        self.spacial_only = False
         print('Marginalized energy likelihood generated.')
 
     def construct_bg_energy_likelihood(self,
@@ -275,6 +278,7 @@ class FqStructure:
         min_index: float,
         max_index: float,
         n_Esim: int,
+        Nbins: int,
         prefab_likelihood_file: str = None
     ):
         print('Generating marginalized background energy likelihood..')
@@ -296,9 +300,10 @@ class FqStructure:
             n_Esim = n_Esim,
             min_index = min_index,
             max_index = max_index,
-            Nbins = 50,
+            Nbins = Nbins,
             prefab_file = prefab_likelihood_file
         )
+        self.spacial_only = False
         print('Separate marginalized energy likelihood generated for bg.')
 
     def set_fit_input(self, fit_input):
@@ -329,10 +334,14 @@ class FqStructure:
                     * sqeuclidean(source_dir - obs_dir)/2
                     )
                 ) # bivariate normal with kappa = 1/sigma^2
+        if spacial_factor == 0: raise ValueError
         if self.spacial_only:
             return spacial_factor
         else:
+            assert hasattr(self, 'energy_likelihood'), 'Missing P(E_d|γ, src)'
             energy_factor = self.energy_likelihood(E_d, gamma) # p(E_d|gamma)
+            if energy_factor == 0: raise ValueError(
+                f'P(E_d|Υ,src) gave 0.0 for E_d={E_d}, Υ={gamma}')
             return spacial_factor * energy_factor
 
     def bg_likelihood(self, E_d, gamma):
@@ -362,16 +371,15 @@ class FqStructure:
             TS = np.empty(N_obs)
             TS[:] = np.NaN
             for j in range(N_obs):
-                S = 0
-                for i in range(source_dir.shape[0]):
-                    S += self.source_likelihood(
-                        E_d[j],
-                        obs_dir[j],
-                        gamma,
-                        source_dir,
-                        kappa
-                        )
-                TS[j] = 2*np.log(S / self.bg_likelihood(E_d[j], gamma))
+                S = self.source_likelihood(
+                    E_d[j],
+                    obs_dir[j],
+                    gamma,
+                    source_dir,
+                    kappa
+                    )
+                LR = S / self.bg_likelihood(E_d[j], gamma)
+                TS[j] = 2*np.log(LR)
             return TS
 
         def event_statistics(self,
@@ -379,7 +387,6 @@ class FqStructure:
             bg_dat: OrderedDict,
             gamma: float
         ):
-
             """Get p-values for fit_input events coming from bg
             Args:
                 fit_input (OrderedDict): output from Simulation.get_data()
@@ -409,7 +416,7 @@ class FqStructure:
             ## get p values
             sim_p = np.zeros_like(sim_TS)
             for i,obs_TS in enumerate(sim_TS):
-                sim_p[i] = (np.mean(bg_TS > obs_TS))
+                sim_p[i] = (np.mean(bg_TS >= obs_TS))
             return sim_TS, bg_TS, sim_p
 
         def event_source_likelihood_from_index(self,
@@ -452,18 +459,17 @@ class FqStructure:
 
             f = n_s/self.fit_input['N']
             # print(f)
-            log_likelihoods = [np.log(
-                f * self.source_likelihood(
-                    self.fit_input['Edet'][i],
-                    self.fit_input['det_dir'][i],
-                    gamma,
-                    self.fit_input['source_dir'],
-                    self.fit_input['kappa']
-                    )
-                + (1-f) * self.bg_likelihood(self.fit_input['Edet'][i], gamma)
-                )
-                for i in range(self.fit_input['N'])
-            ]
+            likelihoods = [f * self.source_likelihood(
+                        self.fit_input['Edet'][i],
+                        self.fit_input['det_dir'][i],
+                        gamma,
+                        self.fit_input['source_dir'],
+                        self.fit_input['kappa']
+                        )
+                    + (1-f) * self.bg_likelihood(self.fit_input['Edet'][i], gamma)
+                 for i in range(self.fit_input['N'])]
+            
+            log_likelihoods = np.log(likelihoods)
             return sum(log_likelihoods)#, log_likelihoods
 
         def _neg_lbl(self, n_s, gamma):
@@ -474,11 +480,12 @@ class FqStructure:
             Minimize -log(likelihood_ratio) for the source hypothesis, 
             returning the Minuit object, best fit ns and index.
             """
-            if isinstance(self.energy_likelihood, MarginalisedEnergyLikelihood):
+            if self.spacial_only:
+                init_index = 0 # anything should work here
+            else:
                 init_index = np.mean((self.energy_likelihood._min_index,
                                       self.energy_likelihood._max_index))
-            else: # Spacial only
-                init_index = 0 # anything should work here
+            
             init_ns = int(np.arange(self.fit_input['N']).mean())
 
             m = Minuit(self._neg_lbl,
@@ -488,14 +495,14 @@ class FqStructure:
             m.errors = [1, 0.1]
             m.errordef = Minuit.LIKELIHOOD # 0.5
             
-            if isinstance(self.energy_likelihood, MarginalisedEnergyLikelihood):
-                m.limits = [(0, self.fit_input['N']-1),
-                            (self.energy_likelihood._min_index,
-                             self.energy_likelihood._max_index)]
-            else:
+            if self.spacial_only:
                 m.fixed['gamma'] = True
                 m.limits = [(0, self.fit_input['N']-1),
                             (None,None)]
+            else:
+                m.limits = [(0, self.fit_input['N']-1),
+                            (self.energy_likelihood._min_index,
+                             self.energy_likelihood._max_index)]
 
             m.migrad()
 
