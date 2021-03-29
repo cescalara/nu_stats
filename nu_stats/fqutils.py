@@ -67,7 +67,7 @@ class AtmosphericEnergyLikelihood:
             Emax = self.Emax*u.GeV, 
             Enorm = self.Emin*u.GeV, # assune Enorm = Emin for now
             N_events = self.n_Esim)
-        Esim.run(seed = np.random.randint())
+        Esim.run(seed = np.random.randint(100))
         energy = self.Esim.get_data()['Edet']
 
         hist, _ = np.histogram(
@@ -135,13 +135,13 @@ class AtmosphericEnergyLikelihood:
         else:
             return self._likelihood[E_index]
 
-    def plot_pdf(self, interp=1, scaled_plot = True):
+    def plot_pdf(self, interp=1, scaled_plot = True, **kwargs):
         Es = np.logspace(np.log10(self._min_E),
                  np.log10(self._max_E), 10000)
-        ll = [self(E, interp) for E in Es]
+        ll = [self(E,0, interp) for E in Es]
         if interp and not scaled_plot:
             ll = [l*self._Nbins for l in ll]
-        p = plt.plot(Es, ll)
+        p = plt.plot(Es, ll, **kwargs)
         plt.xscale('log')
         return p
 
@@ -235,7 +235,7 @@ class MarginalisedEnergyLikelihood:
                 Emin = self.Emin*u.GeV, 
                 Emax = self.Emax*u.GeV, 
                 Enorm = self.Emin*u.GeV, # assune Enorm = Emin for now
-                N_enevts = self.n_Esim)
+                N_events = self.n_Esim)
             Esim.run(seed = i) # Not ideal seeding
             energy = self.Esim.get_data()['Edet']
 
@@ -345,26 +345,26 @@ class MarginalisedEnergyLikelihood:
         else:
             return self._likelihood[i_index, E_index]
 
-    def plot_pdf_at_idx(self, index, interp=2, scaled_plot = True):
+    def plot_pdf_at_idx(self, index, interp=2, scaled_plot = True, **kwargs):
         Es = np.logspace(np.log10(self._min_E),
                  np.log10(self._max_E), 10000)
         ll = [self(E, index, interp) for E in Es]
         if interp and not scaled_plot:
             ll = [l*self._Nbins for l in ll]
-        p = plt.plot(Es, ll)
+        p = plt.plot(Es, ll, **kwargs)
         plt.xscale('log')
         return p
 
-    def plot_pdf_at_E(self, E, interp=2, scaled_plot = True):
+    def plot_pdf_at_E(self, E, interp=2, scaled_plot = True, **kwargs):
         idx = np.linspace(self._min_index,
                  self._max_index,10000)
         ll = [self(E, index, interp) for index in idx]
         if interp and not scaled_plot:
             ll = [l*self._Nbins for l in ll]
-        p = plt.plot(idx, ll)
+        p = plt.plot(idx, ll, **kwargs)
         return p
 
-    def plot_pdf_meshgrid(self, interp=2):
+    def plot_pdf_meshgrid(self, interp=2, **kwargs):
         idx = np.linspace(self._min_index,
                  self._max_index,100)
         Es = np.logspace(np.log10(self._min_E),
@@ -373,7 +373,7 @@ class MarginalisedEnergyLikelihood:
         vfunc = np.vectorize(self.__call__)
         Z = vfunc(Es, idx, interp)
         # np.savetxt("pdfmesh.csv", Z, delimiter=",")
-        plt.pcolormesh(Es, idx, Z, shading='auto')
+        plt.pcolormesh(Es, idx, Z, shading='auto', **kwargs)
         plt.xscale('log')
 
 

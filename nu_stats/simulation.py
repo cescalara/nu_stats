@@ -22,8 +22,8 @@ class Simulation:
     def __init__(
         self,
         L: u.erg / u.s = 0*u.erg/u.s,
-        gamma: float = 0.0,
-        z: float = 0.0,
+        gamma: float = 2.0,
+        z: float = 0.3,
         F_diff_norm: 1 / (u.GeV * u.cm ** 2 * u.s) = 0 / (u.GeV * u.cm ** 2 * u.s),
         atm_flux_norm: 1 / (u.GeV * u.cm ** 2 * u.s) = 0 / (u.GeV * u.cm ** 2 * u.s),
         Emin: u.GeV = 1e5,
@@ -36,6 +36,7 @@ class Simulation:
         :param gamma: Spectral index of source
         :param z: Redshift of source
         :param F_diff_norm: Diffuse background flux at Emin
+        :param atm_flux_norm: atmospheric background flux at Emin
         :param Emin: Minimum energy
         :param Emax: Maximum energy
         :param Enorm: Normalisation energy
@@ -56,13 +57,12 @@ class Simulation:
             self.gamma, self.Emin, self.Emax, self.Enorm, L = self.L, z = self.z
         )
 
-        if F_diff_norm != 0:
-            assert atm_flux_norm == 0, 'for now, only either diffuse or atmospheric bg'
+        if atm_flux_norm == 0:
             self.background = PowerLaw(
                 self.gamma, self.Emin, self.Emax, self.Enorm, Flnorm = self.F_diff_norm
             )
             self.z_bg = 1.0  # Assume background at redshift 1
-        elif atm_flux_norm != 0:
+        else:
             self.background = PowerLaw(
                 3.7, self.Emin, self.Emax, self.Enorm, Flnorm = self.atm_flux_norm
             )
@@ -90,7 +90,7 @@ class Simulation:
         self.truth = collections.OrderedDict()
         self.truth["L"] = self.L.to(u.GeV / u.s).value
         self.truth["gamma"] = self.gamma
-        self.truth["F_diff"] = (
+        self.truth["F_bg"] = (
             self.background.integrate(self.Emin, self.Emax)
             .to(1 / (u.s * u.m ** 2))
             .value
@@ -244,7 +244,7 @@ class Simulation:
         ps_int = self.point_source.integrate(self.Emin, self.Emax)
         Nex_ps = time * aeff * ps_int
 
-        # diffuse bg
+        # bg
         bg_int = self.background.integrate(self.Emin, self.Emax)
         Nex_bg = time * aeff * bg_int
 
