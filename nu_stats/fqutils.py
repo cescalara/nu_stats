@@ -6,6 +6,145 @@ from iminuit import Minuit
 
 from nu_stats.simulation import Simulation
 
+class AtmosphericEnergyLikelihood:
+    def __init__(
+        self,
+        Emin:float = 1e3,
+        Emax:float = 1e10,
+        n_Esim:int = 10000,
+        Nbins:int = 50,
+        prefab_file:str = None
+    ):
+        """ Compute and store the Energy likelihood for atmospheric background
+        by simulating of a large number of reconstructed neutrino tracks.
+
+        Args:
+        Passed to Simulation: 
+            Emin (float, optional): Doubles as Enorm Defaults to 1e3.
+            Emax (float, optional): Defaults to 1e10.
+            n_Esim (int, optional): Number of simulated tracks Defaults to 10000.
+        Histogram params:
+            Nbins (int, optional): Defaults to 50.
+            prefab_file (str, optional): Name of file containing a previously
+                made array. Defaults to None.
+        """
+        self.Emin = Emin
+        self.Emax = Emax
+        self.n_Esim = n_Esim
+
+        self._min_E = Emin/100 # Because Edet min can be lower than PL min
+        self._max_E = Emax*10  # Because Edet max can be higher than PL max
+
+        self._energy_bins = np.linspace(np.log10(self._min_E),
+                                        np.log10(self._max_E),
+                                        Nbins)
+        self._Ebin_width = self._energy_bins[1] - self._energy_bins[0]
+        self._Nbins = Nbins
+
+        if prefab_file is None:
+            self._precompute_histograms()
+        else:
+            ''' 
+            It must be ensured that the other inputs are the same as those
+            that generated the likelihood matrix.
+            TODO: make this easier, through e.g. hdf or pkl
+            '''
+            with open(prefab_file, 'rb') as f:
+                self._likelihood = np.load(f)
+                assert self._likelihood.shape == (Nbins-1, Nbins-1)
+        
+    def save_histogram(self, filename:str = None):
+        if filename is None:
+            filename = f'tmp/atmospheric_{self._Nbins}lik.npy'
+        with open(filename, 'wb') as f:
+            np.save(f, self._likelihood)
+
+    def _precompute_histograms(self):
+        print('Running Esim')
+        Esim = self.Esim = Simulation(
+            atm_flux_norm = 2.5e-18 /(u.GeV * u.cm**2 * u.s), 
+            Emin = self.Emin*u.GeV, 
+            Emax = self.Emax*u.GeV, 
+            Enorm = self.Emin*u.GeV, # assune Enorm = Emin for now
+            N_events = self.n_Esim)
+        Esim.run(seed = np.random.randint())
+        energy = self.Esim.get_data()['Edet']
+
+        hist, _ = np.histogram(
+            np.log10(energy),
+            bins=self._energy_bins,
+            density=True, 
+        )
+        # because density=True, hist gives the value of the pdf at the bin,
+        # normalized such that the integral over the range is 1
+        self._likelihood = hist
+        assert self._likelihood.shape == (len(self._energy_bins[:-1]),)
+        print('done')
+
+    def _other_index(self, bin_index:int, val_lt_bin_center:bool):
+        """
+        Args:
+            bin_index (int): index of bin value belongs to
+            val_lt_bin_center (bool): if the value is lower than that of the bin center
+
+        Returns:
+            None, bin_index-1 or bin_index+1 depending on index validity
+        """
+        cases = [None, bin_index-1, bin_index+1]
+        return cases[(val_lt_bin_center * (bin_index > 0))
+                    + 2 * ((not val_lt_bin_center) * (bin_index < self._Nbins-2))]
+
+    def __call__(self, E, index_dummy, interpol = 1):
+        """
+        P(Ereco | index) = \int dEtrue P(Ereco | Etrue) P(Etrue | index)
+        """
+
+        if E < self._min_E or E > self._max_E:
+            raise ValueError(
+                f"Energy {E} is not in the accepted range"
+                + f" between {self._min_E} and {self._max_E}"
+            )
+
+        if E == self._max_E:
+            E_index = self._Nbins-2
+        else:
+            E_index = np.digitize(np.log10(E), self._energy_bins)-1
+
+        if interpol == 1:
+            '''
+            Perform linear interpolation between closest bins.
+            This is needed for minos to work (mapping directly to historgam has
+            only dirac-like gradients)
+            '''
+            f0 = self._likelihood[E_index]
+            midE = self._energy_bins[E_index]+self._Ebin_width/2
+            low_E = np.log10(E) < midE
+            otherEi = self._other_index(E_index, low_E)
+
+            if otherEi is None:
+                f1 = f0
+            else:
+                f1 = self._likelihood[otherEi]
+
+            dE = ((np.log10(E) - midE) / self._Ebin_width)
+            dE -= 2*dE*low_E # switch sign if to the low
+
+            # linear interpolation
+            lik = ((1-dE)*f0 + (dE)*f1)/ self._Nbins
+            return max(lik, 1e-10)
+        else:
+            return self._likelihood[E_index]
+
+    def plot_pdf(self, interp=1, scaled_plot = True):
+        Es = np.logspace(np.log10(self._min_E),
+                 np.log10(self._max_E), 10000)
+        ll = [self(E, interp) for E in Es]
+        if interp and not scaled_plot:
+            ll = [l*self._Nbins for l in ll]
+        p = plt.plot(Es, ll)
+        plt.xscale('log')
+        return p
+
 
 class MarginalisedEnergyLikelihood:
     def __init__(
@@ -20,14 +159,28 @@ class MarginalisedEnergyLikelihood:
         Nbins:int = 50,
         prefab_file:str = None
     ):
-        """
-        Compute the marginalised energy likelihood by using a 
-        simulation of a large number of reconstructed muon 
-        neutrino tracks.
-        
-        :param energy: Reconstructed muon energies (preferably many).
-        :param sim_index: Spectral index of source spectrum in sim.
-        """
+        """[summary]
+
+        Args:
+            is_source (bool, optional): Simulate a point source?
+                Defaults to True. If False, simulate diffuse bg
+            z (float, optional): redshift of source, does not affect diffuse bg
+                ass that is hardcoded in Simulation. Defaults to 0.0.
+            Emin (float, optional): Passed to sims and used for bin lims.
+                Defaults to 1e3.
+            Emax (float, optional):Passed to sims and used for bin lims.
+                Defaults to 1e10.
+            n_Esim (int, optional): For each spectral index (γ) bin, how many 
+                simulated events. Defaults to 10000.
+            min_index (float, optional): Lower bin lim for spectral index.
+                Defaults to 1.5.
+            max_index (float, optional): Upper bin lim for spectral index.
+                Defaults to 4.0.
+            Nbins (int, optional): number of bins in both E and γ.
+                Defaults to 50.
+            prefab_file (str, optional): Name of file containing a previously
+            made array. Defaults to None.
+        """        
         self.is_source = is_source
         self.z = z
 
@@ -75,14 +228,14 @@ class MarginalisedEnergyLikelihood:
             index_center_bin = index + (self._index_bins[i + 1] - index) / 2
             print('\r', f'Running sim {i+1}/{self._Nbins-1}', end='')
             Esim = self.Esim = Simulation(
-                self.is_source*u.erg/u.s,
-                index_center_bin, 
-                self.z, 
-                (1-self.is_source)/(u.GeV * u.cm**2 * u.s), 
-                self.Emin*u.GeV, 
-                self.Emax*u.GeV, 
-                self.Emin*u.GeV, # assune Enorm = Emin for now
-                self.n_Esim)
+                L = self.is_source*u.erg/u.s,
+                gamma = index_center_bin, 
+                z = self.z, 
+                F_diff_norm = (1-self.is_source)/(u.GeV * u.cm**2 * u.s), 
+                Emin = self.Emin*u.GeV, 
+                Emax = self.Emax*u.GeV, 
+                Enorm = self.Emin*u.GeV, # assune Enorm = Emin for now
+                N_enevts = self.n_Esim)
             Esim.run(seed = i) # Not ideal seeding
             energy = self.Esim.get_data()['Edet']
 
@@ -227,18 +380,7 @@ class MarginalisedEnergyLikelihood:
 class FqStructure:
     def __init__(self):
         """
-        Class for holding useful stuff to do with the Braun paper approach  
-
-        No Args: Spatial model only, i.e. P(Edet|gamma) = 1
-
-        Args: Properties for simulation for precomputing P(Edet|gamma),
-        passed to construct_source_energy_likelihood
-            z (float, optional): Defaults to np.nan.
-            Emin (u.GeV, optional): Defaults to np.nan.
-            Emax (u.GeV, optional): Defaults to np.nan.
-            Esim_gamma (float, optional):  Defaults to np.nan.
-            n_Esim (int, optional): Defaults to np.nan.
-            E_seed (int, optional): Defaults to 123.
+        Class for holding useful stuff to do with the Braun paper approach.
         """
         self.spacial_only = True # Spacial only until energy likelihoods are given
     
@@ -271,7 +413,7 @@ class FqStructure:
         self.spacial_only = False
         print('Marginalized energy likelihood generated.')
 
-    def construct_bg_energy_likelihood(self,
+    def construct_diffuse_bg_energy_likelihood(self,
         z: float,
         Emin: u.GeV,
         Emax: u.GeV,
@@ -300,6 +442,27 @@ class FqStructure:
             n_Esim = n_Esim,
             min_index = min_index,
             max_index = max_index,
+            Nbins = Nbins,
+            prefab_file = prefab_likelihood_file
+        )
+        self.spacial_only = False
+        print('Separate marginalized energy likelihood generated for bg.')
+    
+    def construct_atm_bg_energy_likelihood(self,
+        Emin: u.GeV,
+        Emax: u.GeV,
+        n_Esim: int,
+        Nbins: int,
+        prefab_likelihood_file: str = None
+    ):
+        print('Generating atmospheric background energy likelihood..')
+        '''
+        Parameters like index and redshift are fixed in the Simulation class
+        '''
+        self.bg_energy_likelihood = AtmosphericEnergyLikelihood(
+            Emin = Emin.value,
+            Emax = Emax.value,
+            n_Esim = n_Esim,
             Nbins = Nbins,
             prefab_file = prefab_likelihood_file
         )
@@ -354,10 +517,8 @@ class FqStructure:
         spacial_factor = 1/(4*np.pi) # uniform on sphere
         if self.spacial_only:
             return spacial_factor
-        else:
-            assert hasattr(self, 'bg_energy_likelihood'), 'Missing P(E_d|γ, bg)'
-            return spacial_factor * self.bg_energy_likelihood(E_d, gamma)
-    
+        elif hasattr(self, 'bg_energy_likelihood'):
+            return spacial_factor * self.bg_energy_likelihood(E_d, gamma)    
 
     if True: # Foldable section for methods on individual events
         def test_stat(self,
@@ -458,7 +619,6 @@ class FqStructure:
             )
 
             f = n_s/self.fit_input['N']
-            # print(f)
             likelihoods = [f * self.source_likelihood(
                         self.fit_input['Edet'][i],
                         self.fit_input['det_dir'][i],

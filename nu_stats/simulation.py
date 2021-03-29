@@ -21,10 +21,11 @@ class Simulation:
     @u.quantity_input
     def __init__(
         self,
-        L: u.erg / u.s,
-        gamma: float,
-        z: float,
-        F_diff_norm: 1 / (u.GeV * u.cm ** 2 * u.s),
+        L: u.erg / u.s = 0*u.erg/u.s,
+        gamma: float = 0.0,
+        z: float = 0.0,
+        F_diff_norm: 1 / (u.GeV * u.cm ** 2 * u.s) = 0 / (u.GeV * u.cm ** 2 * u.s),
+        atm_flux_norm: 1 / (u.GeV * u.cm ** 2 * u.s) = 0 / (u.GeV * u.cm ** 2 * u.s),
         Emin: u.GeV = 1e5,
         Emax: u.GeV = 1e8,
         Enorm: u.GeV = 1e5,
@@ -45,6 +46,7 @@ class Simulation:
         self.gamma = gamma
         self.z = z
         self.F_diff_norm = F_diff_norm
+        self.atm_flux_norm = atm_flux_norm
         self.Emin = Emin
         self.Emax = Emax
         self.Enorm = Enorm
@@ -53,11 +55,20 @@ class Simulation:
         self.point_source = PowerLaw(
             self.gamma, self.Emin, self.Emax, self.Enorm, L = self.L, z = self.z
         )
-        self.diffuse_bg = PowerLaw(
-            self.gamma, self.Emin, self.Emax, self.Enorm, Flnorm = self.F_diff_norm
-        )
+
+        if F_diff_norm != 0:
+            assert atm_flux_norm == 0, 'for now, only either diffuse or atmospheric bg'
+            self.background = PowerLaw(
+                self.gamma, self.Emin, self.Emax, self.Enorm, Flnorm = self.F_diff_norm
+            )
+            self.z_bg = 1.0  # Assume background at redshift 1
+        elif atm_flux_norm != 0:
+            self.background = PowerLaw(
+                3.7, self.Emin, self.Emax, self.Enorm, Flnorm = self.atm_flux_norm
+            )
+            self.z_bg = 0.0 # Atmospheric
+
         self.f = self._get_associated_fraction()
-        self.z_bg = 1.0  # Assume background at redshift 1
 
         # Assume simple constant effective area for now
         self.effective_area = 1 * u.m ** 2
@@ -80,7 +91,7 @@ class Simulation:
         self.truth["L"] = self.L.to(u.GeV / u.s).value
         self.truth["gamma"] = self.gamma
         self.truth["F_diff"] = (
-            self.diffuse_bg.integrate(self.Emin, self.Emax)
+            self.background.integrate(self.Emin, self.Emax)
             .to(1 / (u.s * u.m ** 2))
             .value
         )
@@ -133,7 +144,7 @@ class Simulation:
 
             elif self.labels[i] == 1:
 
-                self.Etrue[i] = self.diffuse_bg.sample()
+                self.Etrue[i] = self.background.sample()
                 self.Earr[i] = self.Etrue[i] / (1 + self.z_bg)
                 self.true_dir[i] = sample_vMF(np.array([1, 0, 0]), 0, 1)
 
@@ -234,7 +245,7 @@ class Simulation:
         Nex_ps = time * aeff * ps_int
 
         # diffuse bg
-        bg_int = self.diffuse_bg.integrate(self.Emin, self.Emax)
+        bg_int = self.background.integrate(self.Emin, self.Emax)
         Nex_bg = time * aeff * bg_int
 
         # Weights for sampling
@@ -252,7 +263,7 @@ class Simulation:
         calculate the expected time (dummy) and weights
         """
         ps_int = self.point_source.integrate(self.Emin, self.Emax)
-        bg_int = self.diffuse_bg.integrate(self.Emin, self.Emax)
+        bg_int = self.background.integrate(self.Emin, self.Emax)
         tot_flux = ps_int + bg_int
         
         weights = [ps_int / tot_flux,
@@ -273,6 +284,6 @@ class Simulation:
 
         F_int_ps = self.point_source.integrate(self.Emin, self.Emax)
 
-        F_int_bg = self.diffuse_bg.integrate(self.Emin, self.Emax)
+        F_int_bg = self.background.integrate(self.Emin, self.Emax)
 
         return F_int_ps / (F_int_bg + F_int_ps)
