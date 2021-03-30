@@ -1,6 +1,5 @@
 import numpy as np
 from matplotlib import pyplot as plt
-import ligo.skymap.plot
 
 from astropy import units as u
 from astropy.coordinates import SkyCoord
@@ -26,6 +25,7 @@ class Simulation:
         z: float = 0.3,
         F_diff_norm: 1 / (u.GeV * u.cm ** 2 * u.s) = 0 / (u.GeV * u.cm ** 2 * u.s),
         atm_flux_norm: 1 / (u.GeV * u.cm ** 2 * u.s) = 0 / (u.GeV * u.cm ** 2 * u.s),
+        atm_gamma: float = 3.7,
         Emin: u.GeV = 1e5,
         Emax: u.GeV = 1e8,
         Enorm: u.GeV = 1e5,
@@ -48,6 +48,7 @@ class Simulation:
         self.z = z
         self.F_diff_norm = F_diff_norm
         self.atm_flux_norm = atm_flux_norm
+        self.atm_gamma = atm_gamma
         self.Emin = Emin
         self.Emax = Emax
         self.Enorm = Enorm
@@ -64,7 +65,7 @@ class Simulation:
             self.z_bg = 1.0  # Assume background at redshift 1
         else:
             self.background = PowerLaw(
-                3.7, self.Emin, self.Emax, self.Enorm, Flnorm = self.atm_flux_norm
+                atm_gamma, self.Emin, self.Emax, self.Enorm, Flnorm = self.atm_flux_norm
             )
             self.z_bg = 0.0 # Atmospheric
 
