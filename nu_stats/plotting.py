@@ -1,7 +1,10 @@
+from typing import Counter
 import numpy as np
 from astropy.visualization.wcsaxes.patches import _rotate_polygon
 from matplotlib.patches import PathPatch
 from matplotlib.path import Path
+from astropy.coordinates import SkyCoord
+from matplotlib import pyplot as plt
 import astropy.units as u
 
 
@@ -112,3 +115,53 @@ def get_3d_circle(center, theta, radius, resolution=100):
     lon, lat = get_lon_lat(center, theta, radius, resolution)
 
     return compute_xyz(lon, lat, radius)
+
+def unit_vectors_skymap(unit_vector_dir: np.ndarray, labels: np.ndarray = None):
+    if labels is not None:
+        assert isinstance(labels, np.ndarray)
+        assert labels.shape[0] == unit_vector_dir.shape[0]
+    coords = SkyCoord(
+            unit_vector_dir.T[0],
+            unit_vector_dir.T[1],
+            unit_vector_dir.T[2],
+            representation_type="cartesian",
+            frame="icrs",
+        )
+    coords.representation_type = "spherical"
+
+    fig, ax = plt.subplots(subplot_kw={"projection": "astro degrees mollweide"})
+    fig.set_size_inches((7, 5))
+    count = 0
+    if labels is None:
+        for ra, dec in zip(
+            coords.icrs.ra,
+            coords.icrs.dec,
+        ):
+            count += 1
+            if count>= 1000: continue
+            circle = SphericalCircle(
+                (ra, dec),
+                3 * u.deg,
+                alpha=0.5,
+                transform=ax.get_transform("icrs"),
+            )
+            ax.add_patch(circle)
+    else:
+        label_cmap = plt.cm.Set1(list(range(2)))
+        for ra, dec, l in zip(
+            coords.icrs.ra,
+            coords.icrs.dec,
+            labels,
+        ):
+            count += 1
+            if count>= 1000: continue
+            circle = SphericalCircle(
+                (ra, dec),
+                3 * u.deg,
+                color=label_cmap[l],
+                alpha=0.5,
+                transform=ax.get_transform("icrs"),
+            )
+            ax.add_patch(circle)
+
+    return coords, labels

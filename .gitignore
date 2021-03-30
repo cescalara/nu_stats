@@ -176,3 +176,4 @@ Temporary Items
 
 # For Stan-generated code
 *.hpp
+.vscode/settings.json

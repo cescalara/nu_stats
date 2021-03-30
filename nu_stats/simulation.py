@@ -21,54 +21,65 @@ class Simulation:
     @u.quantity_input
     def __init__(
         self,
-        L: u.erg / u.s,
-        gamma: float,
-        z: float,
-        F_diff_norm: 1 / (u.GeV * u.cm ** 2 * u.s),
+        L: u.erg / u.s = 0*u.erg/u.s,
+        gamma: float = 2.0,
+        z: float = 0.3,
+        F_diff_norm: 1 / (u.GeV * u.cm ** 2 * u.s) = 0 / (u.GeV * u.cm ** 2 * u.s),
+        atm_flux_norm: 1 / (u.GeV * u.cm ** 2 * u.s) = 0 / (u.GeV * u.cm ** 2 * u.s),
         Emin: u.GeV = 1e5,
         Emax: u.GeV = 1e8,
         Enorm: u.GeV = 1e5,
+        N_events: int = 0,
     ):
         """
-        :param L: Luminosity of source
+        :param L: Luminosity of source: 0 gives background only
         :param gamma: Spectral index of source
         :param z: Redshift of source
-        :param F_diff_norm: Diffuse backround flux at Emin
+        :param F_diff_norm: Diffuse background flux at Emin
+        :param atm_flux_norm: atmospheric background flux at Emin
         :param Emin: Minimum energy
         :param Emax: Maximum energy
         :param Enorm: Normalisation energy
+        :param N_events: Number of events to simulate, 0(default) to let self.time decide
         """
 
         self.L = L
         self.gamma = gamma
         self.z = z
         self.F_diff_norm = F_diff_norm
+        self.atm_flux_norm = atm_flux_norm
         self.Emin = Emin
         self.Emax = Emax
         self.Enorm = Enorm
 
-        #  Compute some useful quantities
-        self.D = luminosity_distance(self.z)
-        self.F = self.L / (4 * np.pi * self.D ** 2)
-        self.F = self.F.to(u.GeV / (u.cm ** 2 * u.s))
-
         # Make power law spectra
-        ps_norm = self._get_norm()
         self.point_source = PowerLaw(
-            ps_norm, self.Emin, self.Emax, self.Enorm, self.gamma
+            self.gamma, self.Emin, self.Emax, self.Enorm, L = self.L, z = self.z
         )
-        self.diffuse_bg = PowerLaw(
-            self.F_diff_norm, self.Emin, self.Emax, self.Enorm, self.gamma
-        )
+
+        if atm_flux_norm == 0:
+            self.background = PowerLaw(
+                self.gamma, self.Emin, self.Emax, self.Enorm, Flnorm = self.F_diff_norm
+            )
+            self.z_bg = 1.0  # Assume background at redshift 1
+        else:
+            self.background = PowerLaw(
+                3.7, self.Emin, self.Emax, self.Enorm, Flnorm = self.atm_flux_norm
+            )
+            self.z_bg = 0.0 # Atmospheric
+
         self.f = self._get_associated_fraction()
-        self.z_bg = 1.0  # Assume background at redshift 1
 
         # Assume simple constant effective area for now
         self.effective_area = 1 * u.m ** 2
         self.ang_reco_err = 6 * u.deg
 
         # Assume fixed observation time
-        self.time = 10 * u.yr
+        if N_events:
+            self.N = N_events
+        else:
+            self.time = 10 * u.yr
+            self.N = False
 
         # Assume fixed source position
         self.ra = 180 * u.deg
@@ -79,14 +90,14 @@ class Simulation:
         self.truth = collections.OrderedDict()
         self.truth["L"] = self.L.to(u.GeV / u.s).value
         self.truth["gamma"] = self.gamma
-        self.truth["F_diff"] = (
-            self.diffuse_bg.integrate(self.Emin, self.Emax)
+        self.truth["F_bg"] = (
+            self.background.integrate(self.Emin, self.Emax)
             .to(1 / (u.s * u.m ** 2))
             .value
         )
         self.truth["f"] = self.f
 
-    def run(self, seed=42):
+    def run(self, seed=42, verbose = False):
         """
         Run simulation.
         """
@@ -94,11 +105,14 @@ class Simulation:
         # Set seed
         np.random.seed(seed)
 
-        Nex, weights = self._get_N_expected()
-
-        N = np.random.poisson(Nex)
-        print("Simulating %i events..." % N)
-        self.N = N
+        if not self.N:
+            Nex, weights = self._get_N_expected()
+            N = np.random.poisson(Nex)
+            self.N = N
+        else:
+            self.time, weights = self._get_time_weights()
+        if verbose:
+            print(f"Simulating {self.N} events...", end='\r')
 
         # Get source direction as a unit vector
         self.coord.representation_type = "cartesian"
@@ -112,15 +126,15 @@ class Simulation:
         self.kappa = 7552 * np.power(self.ang_reco_err.value, -2)
 
         # Sample labels 0 <=> PS, 1 <=> BG
-        self.labels = np.random.choice([0, 1], p=weights, size=N)
+        self.labels = np.random.choice([0, 1], p=weights, size=self.N)
 
         self.Etrue = np.zeros_like(self.labels) * u.GeV
         self.Earr = np.zeros_like(self.labels) * u.GeV
         self.Edet = np.zeros_like(self.labels) * u.GeV
-        self.true_dir = np.zeros((N, 3))
-        self.det_dir = np.zeros((N, 3))
+        self.true_dir = np.zeros((self.N, 3))
+        self.det_dir = np.zeros((self.N, 3))
 
-        for i in range(N):
+        for i in range(self.N):
 
             if self.labels[i] == 0:
 
@@ -130,7 +144,7 @@ class Simulation:
 
             elif self.labels[i] == 1:
 
-                self.Etrue[i] = self.diffuse_bg.sample()
+                self.Etrue[i] = self.background.sample()
                 self.Earr[i] = self.Etrue[i] / (1 + self.z_bg)
                 self.true_dir[i] = sample_vMF(np.array([1, 0, 0]), 0, 1)
 
@@ -147,8 +161,8 @@ class Simulation:
             frame="icrs",
         )
         self.det_coord.representation_type = "spherical"
-
-        print("Done!")
+        if verbose:
+            print(f"Simulated {self.N} events")
 
     def show_spectrum(self):
         """
@@ -170,17 +184,19 @@ class Simulation:
         """
         Show simulated directions.
         """
-
         label_cmap = plt.cm.Set1(list(range(2)))
 
         fig, ax = plt.subplots(subplot_kw={"projection": "astro degrees mollweide"})
         fig.set_size_inches((7, 5))
 
+        counter = 0
         for ra, dec, l in zip(
             self.det_coord.icrs.ra,
             self.det_coord.icrs.dec,
             self.labels,
         ):
+            counter +=1 
+            if counter >1000: break
 
             circle = SphericalCircle(
                 (ra, dec),
@@ -192,26 +208,29 @@ class Simulation:
 
             ax.add_patch(circle)
 
-    def get_fit_input(self):
+    def get_data(self):
 
-        fit_input = collections.OrderedDict()
+        data = collections.OrderedDict()
 
-        fit_input["N"] = self.N
-        fit_input["Edet"] = self.Edet.to(u.GeV).value
-        fit_input["det_dir"] = self.det_dir
+        data["N"] = self.N
+        data["Edet"] = self.Edet.to(u.GeV).value
+        data["det_dir"] = self.det_dir
 
-        fit_input["source_dir"] = self.source_dir
-        fit_input["D"] = self.D.to(u.m).value
-        fit_input["z"] = self.z
-        fit_input["z_bg"] = self.z_bg
-        fit_input["Emin"] = self.Emin.to(u.GeV).value
-        fit_input["Emax"] = self.Emax.to(u.GeV).value
+        data["source_dir"] = self.source_dir
+        if self.L == 0: # no source
+            luminosity_distance(self.z)
+        else:
+            data["D"] = self.point_source.D.to(u.m).value
+        data["z"] = self.z
+        data["z_bg"] = self.z_bg
+        data["Emin"] = self.Emin.to(u.GeV).value
+        data["Emax"] = self.Emax.to(u.GeV).value
 
-        fit_input["T"] = self.time.to(u.s).value
-        fit_input["kappa"] = self.kappa
-        fit_input["aeff"] = self.effective_area.to(u.m ** 2).value
+        data["T"] = self.time.to(u.s).value
+        data["kappa"] = self.kappa
+        data["aeff"] = self.effective_area.to(u.m ** 2).value
 
-        return fit_input
+        return data
 
     def _get_N_expected(self):
         """
@@ -225,18 +244,38 @@ class Simulation:
         ps_int = self.point_source.integrate(self.Emin, self.Emax)
         Nex_ps = time * aeff * ps_int
 
-        # diffuse bg
-        bg_int = self.diffuse_bg.integrate(self.Emin, self.Emax)
+        # bg
+        bg_int = self.background.integrate(self.Emin, self.Emax)
         Nex_bg = time * aeff * bg_int
 
         # Weights for sampling
         Nex = Nex_ps.value + Nex_bg.value
-        weights = [Nex_ps.value / Nex, Nex_bg.value / Nex]
+        weights = [Nex_ps.value / Nex,
+                   Nex_bg.value / Nex]
 
         self.Nex_ps = Nex_ps.value
         self.Nex_bg = Nex_bg.value
 
         return Nex, weights
+
+    def _get_time_weights(self):
+        """
+        calculate the expected time (dummy) and weights
+        """
+        ps_int = self.point_source.integrate(self.Emin, self.Emax)
+        bg_int = self.background.integrate(self.Emin, self.Emax)
+        tot_flux = ps_int + bg_int
+        
+        weights = [ps_int / tot_flux,
+                   bg_int / tot_flux]
+        
+        self.N_ps = self.N * weights[0]
+        self.N_bg = self.N * weights[1]
+
+        aeff = self.effective_area.to(u.cm ** 2)
+        time = (self.N_bg / (bg_int * aeff)).to(u.yr)
+
+        return time, weights
 
     def _get_associated_fraction(self):
         """
@@ -245,26 +284,6 @@ class Simulation:
 
         F_int_ps = self.point_source.integrate(self.Emin, self.Emax)
 
-        F_int_bg = self.diffuse_bg.integrate(self.Emin, self.Emax)
+        F_int_bg = self.background.integrate(self.Emin, self.Emax)
 
         return F_int_ps / (F_int_bg + F_int_ps)
-
-    def _get_norm(self):
-        """
-        Get power law spectrum normalisation.
-        """
-
-        if self.gamma == 2:
-
-            int_norm = 1 / np.power(self.Enorm, -self.gamma)
-            power_int = int_norm * np.log(self.Emax / self.Emin)
-
-        else:
-
-            int_norm = 1 / (np.power(self.Enorm, -self.gamma) * (2 - self.gamma))
-            power_int = int_norm * (
-                np.power(self.Emax, 2 - self.gamma)
-                - np.power(self.Emin, 2 - self.gamma)
-            )
-
-        return self.F / power_int

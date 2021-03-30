@@ -75,23 +75,23 @@ transformed parameters {
       /* Point source */
       if (k == 1) {
 
-	/* Energy losses */
-	Earr[i] = Etrue[i] / (1 + z);
+        /* Energy losses */
+        Earr[i] = Etrue[i] / (1 + z);
 
-	/* P(det_dir | true_dir, kappa) */
-	log_prob[i][k] += vMF_lpdf(det_dir[i] | source_dir, kappa);
+        /* P(det_dir | true_dir, kappa) */
+        log_prob[i][k] += vMF_lpdf(det_dir[i] | source_dir, kappa);
 	
       }
 
       /* Diffuse background */
       else if (k == 2) {
 
-	/* Energy losses */
-	Earr[i] = Etrue[i] / (1 + z_bg);
+        /* Energy losses */
+        Earr[i] = Etrue[i] / (1 + z_bg);
 
-	/* P(uniform on sphere) */
-	log_prob[i][k] += log(1 / (4*pi()));	
-       
+        /* P(uniform on sphere) */
+        log_prob[i][k] += log(1 / (4*pi()));	
+            
       }
 
       /* Detection effects */
