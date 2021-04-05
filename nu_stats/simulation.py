@@ -1,5 +1,7 @@
 import numpy as np
 from matplotlib import pyplot as plt
+import ligo.skymap.plot # for astro mollweide subplot projection
+
 
 from astropy import units as u
 from astropy.coordinates import SkyCoord
@@ -287,4 +289,4 @@ class Simulation:
 
         F_int_bg = self.background.integrate(self.Emin, self.Emax)
 
-        return F_int_ps / (F_int_bg + F_int_ps)
+        return (F_int_ps / (F_int_bg + F_int_ps)).value

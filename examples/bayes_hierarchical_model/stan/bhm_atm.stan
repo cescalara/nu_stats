@@ -33,7 +33,7 @@ parameters {
   
   real<lower=0, upper=1e55> L; // GeV s^-1
   
-  real<lower=0, upper=1e-5> F_diff; // m^-2 s^-1
+  real<lower=0, upper=1e-5> F_bg; // m^-2 s^-1
   
   vector<lower=Emin, upper=Emax>[N] Etrue;
   
@@ -55,7 +55,7 @@ transformed parameters {
   F_src *= flux_conv(gamma, Emin, Emax); // m^-2 s^-1
 
   F[1] = F_src;
-  F[2] = F_diff;
+  F[2] = F_bg;
 
   f = F_src / sum(F);
 
@@ -103,7 +103,7 @@ transformed parameters {
 
   /* Calculate expected number of events */
   Nex_ps = T * aeff * F_src; 
-  Nex_bg = T * aeff * F_diff; 
+  Nex_bg = T * aeff * F_bg; 
   Nex = Nex_ps + Nex_bg;
   
 }
@@ -122,7 +122,7 @@ model {
 
   /* Weakly informative priors */
   L ~ lognormal(log(1e51), 5);
-  F_diff ~ lognormal(log(1e-6), 5);
+  F_bg ~ lognormal(log(1e-6), 5);
   gamma ~ normal(2, 0.5);
   
 }

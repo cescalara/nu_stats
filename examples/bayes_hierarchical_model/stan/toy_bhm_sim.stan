@@ -10,7 +10,7 @@ data {
   real L; // GeV s^-1
   unit_vector[3] source_dir;
   real gamma;
-  real F_diff; // m^-2 s^-1
+  real F_bg; // m^-2 s^-1
   real Emin; // GeV
   real Emax; // GeV
   real z;
@@ -36,10 +36,10 @@ transformed data {
   F_src = L / (4 * pi() * pow(D, 2));
   F_src *= flux_conv(gamma, Emin, Emax);
 
-  f = F_src / (F_src + F_diff);
+  f = F_src / (F_src + F_bg);
 
   Nex_ps = T * aeff * F_src; 
-  Nex_bg = T * aeff * F_diff;
+  Nex_bg = T * aeff * F_bg;
   Nex = Nex_ps + Nex_bg;
 
 

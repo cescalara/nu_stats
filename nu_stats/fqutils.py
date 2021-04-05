@@ -10,7 +10,8 @@ from nu_stats.energylikelihoods import AtmosphericEnergyLikelihood, Marginalised
 class FqStructure:
     def __init__(self):
         """
-        Class for holding useful stuff to do with the Braun paper approach.
+        Class for holding useful stuff to do with the Braun atricle approach to
+        neutrino source association.
         """
         self.spatial_only = True # spatial only until energy likelihoods are given
     
@@ -100,6 +101,10 @@ class FqStructure:
         print('Separate marginalized energy likelihood generated for bg.')
 
     def set_fit_input(self, fit_input):
+        """
+        Args:
+            fit_input (Dict)
+        """
         self.fit_input = fit_input
 
     def source_likelihood(self,
@@ -208,6 +213,8 @@ class FqStructure:
             sim_p = np.zeros_like(sim_TS)
             for i,obs_TS in enumerate(sim_TS):
                 sim_p[i] = (np.mean(bg_TS >= obs_TS))
+                # ratio of bg_TS larger than observation_TS
+                # p value defined on counts
             return sim_TS, bg_TS, sim_p
 
         def event_source_likelihood_from_index(self,
@@ -276,7 +283,7 @@ class FqStructure:
                 init_index = np.mean((self.energy_likelihood._min_index,
                                       self.energy_likelihood._max_index))
             
-            init_ns = int(np.arange(self.fit_input['N']).mean())
+            init_ns = np.arange(self.fit_input['N']).mean()
 
             m = Minuit(self._neg_lbl,
                 n_s = init_ns,
