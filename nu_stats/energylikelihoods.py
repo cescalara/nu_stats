@@ -50,7 +50,7 @@ class AtmosphericEnergyLikelihood:
             '''
             with open(prefab_file, 'rb') as f:
                 self._likelihood = np.load(f)
-                assert self._likelihood.shape == (Nbins-1, Nbins-1)
+                assert self._likelihood.shape == (Nbins-1,)
         
     def save_histogram(self, filename:str = None):
         if filename is None:

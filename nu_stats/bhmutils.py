@@ -45,7 +45,7 @@ class BhStructure:
         self.fit.diagnose()
 
     def print_summary(self):
-        self.fit.summary()
+        print(self.fit.summary())
     
     def plot_traces(self, var_names:list):
         arviz.plot_trace(self.fit, var_names=var_names)

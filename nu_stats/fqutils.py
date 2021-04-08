@@ -323,7 +323,6 @@ class FqStructure:
             # first log_band term is null hypothesis and 
             return TS
 
-
         def grid_log_band_likelihood(self,
             n_array: np.ndarray,
             gamma_array: np.ndarray,
