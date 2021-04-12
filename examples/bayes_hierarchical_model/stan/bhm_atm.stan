@@ -47,7 +47,6 @@ transformed parameters {
   real Nex;
   real Nex_ps;
   real Nex_bg;
-  vector[2] eps;
   vector[2] log_prob[N];
   vector[N] Earr;
   

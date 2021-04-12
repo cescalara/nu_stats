@@ -272,11 +272,14 @@ class Simulation:
         weights = [ps_int / tot_flux,
                    bg_int / tot_flux]
         
-        self.N_ps = self.N * weights[0]
-        self.N_bg = self.N * weights[1]
+        Nex_ps = self.N * weights[0]
+        Nex_bg = self.N * weights[1]
 
         aeff = self.effective_area.to(u.cm ** 2)
-        time = (self.N_bg / (bg_int * aeff)).to(u.yr)
+        time = (Nex_bg / (bg_int * aeff)).to(u.yr)
+
+        self.Nex_ps = Nex_ps.value
+        self.Nex_bg = Nex_bg.value
 
         return time, weights
 

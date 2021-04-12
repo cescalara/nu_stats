@@ -22,7 +22,7 @@ class BhStructure:
     def load_model(self, stan_file_name:str):
         self.stan_model = CmdStanModel(stan_file = stan_file_name)
     
-    def run(self, num_chains:int = 4, samples_per_chain:int = 1000, *args):
+    def run(self, num_chains:int = 4, samples_per_chain:int = 1000, **kwargs):
         """ Run the NUTS sampler to sample from model posterior through
             cmdstanpy.CmdStanModel.sample on the loaded stan model.
 
@@ -37,7 +37,7 @@ class BhStructure:
             data=self.fit_input,
             iter_sampling=samples_per_chain,
             chains=num_chains,
-            *args
+            **kwargs
         )
         self.vars = self.fit.stan_variables()
     
@@ -47,12 +47,12 @@ class BhStructure:
     def print_summary(self):
         print(self.fit.summary())
     
-    def plot_traces(self, var_names:list):
-        arviz.plot_trace(self.fit, var_names=var_names)
+    def plot_traces(self, var_names:list, **kwargs):
+        arviz.plot_trace(self.fit, var_names=var_names, **kwargs)
 
-    def plot_corner(self, var_names:list, truths_list:list): 
+    def plot_corner(self, var_names:list, truths_list:list, **kwargs): 
         samples = np.column_stack([self.vars[key] for key in var_names])
-        corner.corner(samples, labels=var_names, truths=truths_list)
+        corner.corner(samples, labels=var_names, truths=truths_list, **kwargs)
   
     def classify_events(self):
         """ Get association probabilities for fitted events
