@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from os import terminal_size
 import numpy as np
 from astropy import units as u
 from matplotlib import pyplot as plt
@@ -8,11 +9,13 @@ from nu_stats.energylikelihoods import AtmosphericEnergyLikelihood, Marginalised
 
 
 class FqStructure:
-    def __init__(self):
+    def __init__(self, fit_input:dict=None):
         """
         Class for holding useful stuff to do with the Braun atricle approach to
         neutrino source association.
         """
+        if fit_input is not None:
+            self.fit_input = fit_input
         self.spatial_only = True # spatial only until energy likelihoods are given
     
     def construct_source_energy_likelihood(self,
@@ -23,9 +26,10 @@ class FqStructure:
         max_index: float,
         n_Esim: int,
         Nbins: int,
-        prefab_likelihood_file: str = None
+        prefab_likelihood_file: str = None,
+        verbose = True
     ):
-        print('Generating marginalized energy likelihood..')
+        if verbose: print('Generating marginalized energy likelihood..')
         '''
         Because we only want a sample of Edet for a certain gamma, with no
         regard for spatial factor, we can use a single source with any L.
@@ -42,7 +46,7 @@ class FqStructure:
             prefab_file = prefab_likelihood_file
         )
         self.spatial_only = False
-        print('Marginalized energy likelihood generated.')
+        if verbose: print('Marginalized energy likelihood generated.')
 
     def construct_diffuse_bg_energy_likelihood(self,
         z: float,
@@ -52,9 +56,10 @@ class FqStructure:
         max_index: float,
         n_Esim: int,
         Nbins: int,
-        prefab_likelihood_file: str = None
+        prefab_likelihood_file: str = None,
+        verbose = True
     ):
-        print('Generating marginalized background energy likelihood..')
+        if verbose: print('Generating marginalized background energy likelihood..')
         '''
         TODO: Because is_source=False here will make the reference
         energy simulations be set to bg only and z in the Simulation input is
@@ -77,16 +82,17 @@ class FqStructure:
             prefab_file = prefab_likelihood_file
         )
         self.spatial_only = False
-        print('Separate marginalized energy likelihood generated for bg.')
+        if verbose: print('Separate marginalized energy likelihood generated for bg.')
     
     def construct_atm_bg_energy_likelihood(self,
         Emin: u.GeV,
         Emax: u.GeV,
         n_Esim: int,
         Nbins: int,
-        prefab_likelihood_file: str = None
+        prefab_likelihood_file: str = None,
+        verbose = True
     ):
-        print('Generating atmospheric background energy likelihood..')
+        if verbose: print('Generating atmospheric background energy likelihood..')
         '''
         Parameters like index and redshift are fixed in the Simulation class
         '''
@@ -98,7 +104,7 @@ class FqStructure:
             prefab_file = prefab_likelihood_file
         )
         self.spatial_only = False
-        print('Separate marginalized energy likelihood generated for bg.')
+        if verbose: print('Separate marginalized energy likelihood generated for bg.')
 
     def set_fit_input(self, fit_input):
         """
@@ -302,7 +308,7 @@ class FqStructure:
                              self.energy_likelihood._max_index)]
 
             m.migrad()
-
+            self.minuit = m
             self._best_fit_ns = m.values["n_s"]
             self._best_fit_index = m.values["gamma"]
             return m, self._best_fit_ns, self._best_fit_index

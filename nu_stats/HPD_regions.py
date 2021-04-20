@@ -75,7 +75,7 @@ def plot_HPD_levels(xdata, ydata, levels = [0.99, 0.9, 0.6, 0.3],
     """
 
     new_levels = HPD_contours(xdata, ydata, levels, bins)
-    sns.kdeplot(xdata, ydata, n_levels = new_levels,
+    sns.kdeplot(xdata, y=ydata, n_levels = new_levels,
                 **kwargs)
 
     

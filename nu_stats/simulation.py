@@ -276,7 +276,8 @@ class Simulation:
         Nex_bg = self.N * weights[1]
 
         aeff = self.effective_area.to(u.cm ** 2)
-        time = (Nex_bg / (bg_int * aeff)).to(u.yr)
+        time = (np.random.exponential((Nex_bg / (bg_int * aeff)).value)*u.s
+        ).to(u.yr)
 
         self.Nex_ps = Nex_ps.value
         self.Nex_bg = Nex_bg.value
