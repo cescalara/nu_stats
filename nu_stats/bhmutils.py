@@ -53,12 +53,12 @@ class BhStructure:
     def plot_corner(self, var_names:list, truths_list:list, **kwargs): 
         samples = np.column_stack([self.vars[key] for key in var_names])
         corner.corner(samples, labels=var_names, truths=truths_list, **kwargs)
-  
-    def classify_events(self):
+
+    def association_probs(self, expected=True):
         """ Get association probabilities for fitted events
         Returns:
-            np.array: association probabilities
-        """    
+            np.array: association probabilities (estimate of )
+        """
         N_events = self.fit_input['N']
         log_probs = self.fit.stan_variable('log_prob')
         log_probs = log_probs.transpose(1,2,0)
@@ -66,20 +66,30 @@ class BhStructure:
 
         n_comps = np.shape(log_probs)[1] # number of components
 
-        association_prob = np.zeros((N_events,n_comps))
-        association_prob.fill(np.nan)
+        if expected:
+            association_prob = np.zeros((N_events,n_comps))
+            association_prob.fill(np.nan)
+            for i, lp in enumerate(log_probs):
+                ups = [] # unnormalized association prob
+                ps = [] # association prob
+                for c in range(n_comps):
+                    ups.append(np.sum(np.exp(lp[c])))
+                norm = sum(ups)
 
-        for i, lp in enumerate(log_probs):
-            lps = [] # unnormalized association prob
-            ps = [] # association prob
-            for src in range(n_comps):
-                lps.append(np.sum(np.exp(lp[src]))) # Basically E[log_prob]
-            norm = sum(lps)
+                for c in range(n_comps):
+                    ps.append(ups[c] / norm)
+                association_prob[i,:] = np.array(ps)
 
-            for src in range(n_comps):
-                ps.append(lps[src] / norm)
-            association_prob[i,:] = np.array(ps)
+            # Unnecessary sanity check
+            assert not np.isnan(association_prob).any()
+            return association_prob
 
-        # Unnecessary sanity check
-        assert not np.isnan(association_prob).any()
-        return association_prob
+        else:
+            normalized_probs = np.zeros_like(log_probs)
+            for j, lp in enumerate(log_probs):
+                nlp = []
+                for i in  [0,1]:
+                    nlp.append(np.exp(log_probs[j,i]))
+                norm = sum(nlp)
+                normalized_probs[j] = np.exp(log_probs[j])/norm
+            return normalized_probs
