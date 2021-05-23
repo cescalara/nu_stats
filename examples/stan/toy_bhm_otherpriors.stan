@@ -122,6 +122,6 @@ model {
   /* Weakly informative priors */
   L ~ lognormal(log(1e51), 5);
   F_bg ~ lognormal(log(1e-6), 5);
-  gamma ~ normal(2, 4);
+  gamma ~ normal(2, .01);
   
 }

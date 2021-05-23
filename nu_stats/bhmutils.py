@@ -54,10 +54,15 @@ class BhStructure:
         samples = np.column_stack([self.vars[key] for key in var_names])
         corner.corner(samples, labels=var_names, truths=truths_list, **kwargs)
 
-    def association_probs(self, expected=True):
+    def association_probs(self, expected:bool=True):
         """ Get association probabilities for fitted events
+        Args:
+            expected (bool, optional):
+                True: Use the expected values from either chains then normalize
+                False: Normalize element-wise
+                Note that these two are very different
         Returns:
-            np.array: association probabilities (estimate of )
+            np.array: association probabilities (estimate)
         """
         N_events = self.fit_input['N']
         log_probs = self.fit.stan_variable('log_prob')
@@ -69,10 +74,10 @@ class BhStructure:
         if expected:
             association_prob = np.zeros((N_events,n_comps))
             association_prob.fill(np.nan)
-            for i, lp in enumerate(log_probs):
+            for i, lp in enumerate(log_probs): # for each observation...
                 ups = [] # unnormalized association prob
                 ps = [] # association prob
-                for c in range(n_comps):
+                for c in range(n_comps): # for each component
                     ups.append(np.sum(np.exp(lp[c])))
                 norm = sum(ups)
 
@@ -88,8 +93,8 @@ class BhStructure:
             normalized_probs = np.zeros_like(log_probs)
             for j, lp in enumerate(log_probs):
                 nlp = []
-                for i in  [0,1]:
-                    nlp.append(np.exp(log_probs[j,i]))
+                for c in range(n_comps):
+                    nlp.append(np.exp(lp[c]))
                 norm = sum(nlp)
-                normalized_probs[j] = np.exp(log_probs[j])/norm
+                normalized_probs[j] = np.exp(lp)/norm # elementwise divide
             return normalized_probs

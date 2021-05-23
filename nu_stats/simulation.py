@@ -77,7 +77,7 @@ class Simulation:
         self.effective_area = 1 * u.m ** 2
         self.ang_reco_err = 6 * u.deg
 
-        # Assume fixed observation time
+        # Assume fixed observation time or sample to get N_events
         if N_events:
             self.N = N_events
         else:
@@ -221,7 +221,7 @@ class Simulation:
 
         data["source_dir"] = self.source_dir
         if self.L == 0: # no source
-            luminosity_distance(self.z)
+            data["D"] = luminosity_distance(self.z).to(u.m).value
         else:
             data["D"] = self.point_source.D.to(u.m).value
         data["z"] = self.z
@@ -276,7 +276,7 @@ class Simulation:
         Nex_bg = self.N * weights[1]
 
         aeff = self.effective_area.to(u.cm ** 2)
-        time = (np.random.exponential((Nex_bg / (bg_int * aeff)).value)*u.s
+        time = (np.random.exponential(((Nex_bg+Nex_ps) / ((tot_flux) * aeff)).value)*u.s
         ).to(u.yr)
 
         self.Nex_ps = Nex_ps.value
