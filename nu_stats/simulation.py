@@ -1,6 +1,7 @@
 import numpy as np
 from matplotlib import pyplot as plt
-import ligo.skymap.plot
+import ligo.skymap.plot # for astro mollweide subplot projection
+
 
 from astropy import units as u
 from astropy.coordinates import SkyCoord
@@ -26,6 +27,7 @@ class Simulation:
         z: float = 0.3,
         F_diff_norm: 1 / (u.GeV * u.cm ** 2 * u.s) = 0 / (u.GeV * u.cm ** 2 * u.s),
         atm_flux_norm: 1 / (u.GeV * u.cm ** 2 * u.s) = 0 / (u.GeV * u.cm ** 2 * u.s),
+        atm_gamma: float = 3.7,
         Emin: u.GeV = 1e5,
         Emax: u.GeV = 1e8,
         Enorm: u.GeV = 1e5,
@@ -48,6 +50,7 @@ class Simulation:
         self.z = z
         self.F_diff_norm = F_diff_norm
         self.atm_flux_norm = atm_flux_norm
+        self.atm_gamma = atm_gamma
         self.Emin = Emin
         self.Emax = Emax
         self.Enorm = Enorm
@@ -64,7 +67,7 @@ class Simulation:
             self.z_bg = 1.0  # Assume background at redshift 1
         else:
             self.background = PowerLaw(
-                3.7, self.Emin, self.Emax, self.Enorm, Flnorm = self.atm_flux_norm
+                atm_gamma, self.Emin, self.Emax, self.Enorm, Flnorm = self.atm_flux_norm
             )
             self.z_bg = 0.0 # Atmospheric
 
@@ -74,7 +77,7 @@ class Simulation:
         self.effective_area = 1 * u.m ** 2
         self.ang_reco_err = 6 * u.deg
 
-        # Assume fixed observation time
+        # Assume fixed observation time or sample to get N_events
         if N_events:
             self.N = N_events
         else:
@@ -218,7 +221,7 @@ class Simulation:
 
         data["source_dir"] = self.source_dir
         if self.L == 0: # no source
-            luminosity_distance(self.z)
+            data["D"] = luminosity_distance(self.z).to(u.m).value
         else:
             data["D"] = self.point_source.D.to(u.m).value
         data["z"] = self.z
@@ -269,11 +272,15 @@ class Simulation:
         weights = [ps_int / tot_flux,
                    bg_int / tot_flux]
         
-        self.N_ps = self.N * weights[0]
-        self.N_bg = self.N * weights[1]
+        Nex_ps = self.N * weights[0]
+        Nex_bg = self.N * weights[1]
 
         aeff = self.effective_area.to(u.cm ** 2)
-        time = (self.N_bg / (bg_int * aeff)).to(u.yr)
+        time = (np.random.exponential(((Nex_bg+Nex_ps) / ((tot_flux) * aeff)).value)*u.s
+        ).to(u.yr)
+
+        self.Nex_ps = Nex_ps.value
+        self.Nex_bg = Nex_bg.value
 
         return time, weights
 
@@ -286,4 +293,4 @@ class Simulation:
 
         F_int_bg = self.background.integrate(self.Emin, self.Emax)
 
-        return F_int_ps / (F_int_bg + F_int_ps)
+        return (F_int_ps / (F_int_bg + F_int_ps)).value
